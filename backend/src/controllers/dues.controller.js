@@ -1,0 +1,3 @@
+import service from '../services/dues.service.js';import { asyncHandler } from '../utils/async-handler.js';import { sendSuccess } from '../utils/api-response.js';const meta=req=>({ipAddress:req.ip,userAgent:req.get('user-agent')});
+export const previewDues=asyncHandler(async(req,res)=>sendSuccess(res,200,'Outstanding dues calculated successfully',await service.preview(req.auth.activeSocietyId,req.query.as_of)));
+export const applyDues=asyncHandler(async(req,res)=>sendSuccess(res,200,'Late fee and interest applied successfully',await service.apply(req.auth.activeSocietyId,req.body.as_of,req.auth.userId,meta(req))));

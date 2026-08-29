@@ -1,35 +1,9 @@
 "use client";
-
-import { Eye } from "lucide-react";
-import { PageHeader } from "@/components/layout/PageHeader";
-import { Card } from "@/components/ui/Card";
-import { DataTable, Column } from "@/components/ui/DataTable";
-import { StatusBadge } from "@/components/ui/Badge";
-import { maintenanceBills } from "@/lib/mock-data";
-import { formatCurrency, formatDate } from "@/lib/utils";
-
-const overdue = maintenanceBills.filter((b) => b.status === "Overdue").map((b) => ({
-  ...b,
-  lateFee: Math.round(b.amount * 0.02),
-}));
-
-export default function LateFeesPage() {
-  const columns = [
-    { key: "billNo", header: "Bill No." },
-    { key: "flatNo", header: "Flat" },
-    { key: "ownerName", header: "Owner" },
-    { key: "dueDate", header: "Due Date", render: (r: typeof overdue[0]) => formatDate(r.dueDate) },
-    { key: "amount", header: "Bill Amount", render: (r: typeof overdue[0]) => formatCurrency(r.amount) },
-    { key: "lateFee", header: "Late Fee (2%)", render: (r: typeof overdue[0]) => formatCurrency(r.lateFee) },
-    { key: "status", header: "Status", render: (r: typeof overdue[0]) => <StatusBadge status={r.status} /> },
-  ];
-
-  return (
-    <div>
-      <PageHeader title="Late Fees" description="Late fee applied on overdue maintenance bills" />
-      <Card>
-        <DataTable columns={columns} data={overdue} keyField="id" searchPlaceholder="Search..." rowActions={[{ label: "View Bill", icon: <Eye className="h-4 w-4" />, onClick: () => {} }]} />
-      </Card>
-    </div>
-  );
-}
+import { useCallback,useEffect,useState } from "react";import { AlertTriangle,Calculator } from "lucide-react";import { PageHeader } from "@/components/layout/PageHeader";import { Card,CardBody } from "@/components/ui/Card";import { Button } from "@/components/ui/Button";import { Input } from "@/components/ui/Input";import { Column,DataTable } from "@/components/ui/DataTable";import { StatusBadge } from "@/components/ui/Badge";import { formatCurrency,formatDate } from "@/lib/utils";import { getSocietySession } from "@/lib/session";
+const API_URL=process.env.NEXT_PUBLIC_API_URL??"http://localhost:5000/api/v1";const today=()=>new Date().toISOString().slice(0,10);type Charge={type:string;from:string;to:string;rate:number;days:number;amount:number};type Bill={id:number;bill_number:string;flat_no:string;wing_name:string;recipient_name:string|null;due_date:string;balance_amount:number;pending_charge:number;new_balance:number;charges:Charge[]};type Data={as_of_date:string;settings:{grace_period_days:number;late_fee_type:string;late_fee_value:number;interest_rate_per_annum:number};summary:{bill_count:number;current_outstanding:number;pending_charges:number;projected_outstanding:number};bills:Bill[]};const empty:Data={as_of_date:today(),settings:{grace_period_days:0,late_fee_type:"NONE",late_fee_value:0,interest_rate_per_annum:0},summary:{bill_count:0,current_outstanding:0,pending_charges:0,projected_outstanding:0},bills:[]};
+export default function LateFeesPage(){const[asOf,setAsOf]=useState(today());const[data,setData]=useState<Data>(empty);const[error,setError]=useState("");const[notice,setNotice]=useState("");const[loading,setLoading]=useState(false);
+const load=useCallback(async()=>{const s=getSocietySession();if(!s?.accessToken)return setError("Please login and select a society.");setLoading(true);setError("");try{const r=await fetch(`${API_URL}/society/maintenance/dues?as_of=${asOf}`,{headers:{Authorization:`Bearer ${s.accessToken}`}});const j=await r.json();if(!r.ok||!j.success)throw new Error(j.message);setData(j.data);}catch(e){setError(e instanceof Error?e.message:"Unable to calculate dues.");}finally{setLoading(false);}},[asOf]);useEffect(()=>{void load();},[load]);
+async function apply(){if(data.summary.pending_charges<=0)return;if(!window.confirm(`Apply ${formatCurrency(data.summary.pending_charges)} late charges to ${data.summary.bill_count} overdue bill(s)? This changes bill balances.`))return;const s=getSocietySession();if(!s?.accessToken)return;setLoading(true);setError("");setNotice("");try{const r=await fetch(`${API_URL}/society/maintenance/dues/apply`,{method:"POST",headers:{"Content-Type":"application/json",Authorization:`Bearer ${s.accessToken}`},body:JSON.stringify({as_of:asOf})});const j=await r.json();if(!r.ok||!j.success)throw new Error(j.message);setNotice(`${j.data.bill_count} bill(s) updated. Charges applied: ${formatCurrency(j.data.total_charges)}.`);await load();}catch(e){setError(e instanceof Error?e.message:"Unable to apply charges.");}finally{setLoading(false);}}
+const columns:Column<Bill>[]=[{key:"bill_number",header:"Bill No."},{key:"flat_no",header:"Flat",render:r=>`${r.wing_name}-${r.flat_no}`},{key:"recipient_name",header:"Member",render:r=>r.recipient_name||"—"},{key:"due_date",header:"Due Date",render:r=>formatDate(r.due_date)},{key:"balance_amount",header:"Current Due",render:r=>formatCurrency(r.balance_amount)},{key:"pending_charge",header:"New Charges",render:r=><span title={r.charges.map(c=>`${c.type}: ${formatCurrency(c.amount)}`).join("\n")} className="font-medium text-[var(--color-danger)]">{formatCurrency(r.pending_charge)}</span>},{key:"new_balance",header:"New Balance",render:r=>formatCurrency(r.new_balance)},{key:"status",header:"Status",render:()=> <StatusBadge status="Overdue"/>}];
+return <div><PageHeader title="Late Fees & Outstanding" description="Preview and post overdue late fee and annual interest" actions={<Button onClick={()=>void apply()} loading={loading} disabled={data.summary.pending_charges<=0}><Calculator className="h-4 w-4"/> Apply Charges</Button>}/>{error&&<p className="mb-4 rounded-md bg-[var(--color-danger)]/10 p-3 text-sm text-[var(--color-danger)]">{error}</p>}{notice&&<p className="mb-4 rounded-md bg-[var(--color-success)]/10 p-3 text-sm text-[var(--color-success)]">{notice}</p>}<Card className="mb-5"><CardBody><div className="grid grid-cols-1 gap-4 sm:grid-cols-4"><Input label="Calculate As Of" type="date" value={asOf} onChange={e=>setAsOf(e.target.value)}/><Summary label="Current Outstanding" value={data.summary.current_outstanding}/><Summary label="Pending Charges" value={data.summary.pending_charges} danger/><Summary label="Projected Outstanding" value={data.summary.projected_outstanding}/></div><p className="mt-4 text-xs text-[var(--color-text-secondary)]">Rules: Grace {data.settings.grace_period_days} day(s) · Late Fee {data.settings.late_fee_type} {data.settings.late_fee_value} · Interest {data.settings.interest_rate_per_annum}% yearly. Preview does not change bills until Apply Charges is confirmed.</p></CardBody></Card><Card><DataTable columns={columns} data={data.bills} keyField="id" searchFields={["bill_number","flat_no","recipient_name"]} searchPlaceholder={loading?"Calculating dues...":"Search overdue bills..."}/>{!data.bills.length&&!loading&&<div className="flex items-center justify-center gap-2 p-6 text-sm text-[var(--color-text-secondary)]"><AlertTriangle className="h-4 w-4"/> No overdue bills after grace period.</div>}</Card></div>}
+function Summary({label,value,danger=false}:{label:string;value:number;danger?:boolean}){return <div className="rounded-md bg-[var(--color-bg)] p-3"><p className="text-xs text-[var(--color-text-secondary)]">{label}</p><p className={`mt-1 text-lg font-semibold ${danger?"text-[var(--color-danger)]":""}`}>{formatCurrency(value)}</p></div>}

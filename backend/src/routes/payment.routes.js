@@ -1,0 +1,15 @@
+import express from 'express';
+import { collectPayment, getReceipt, listPayments, outstandingBills, reconciliation, reconcilePayment, reversePayment } from '../controllers/payment.controller.js';
+import { authenticate } from '../middleware/authenticate.middleware.js';
+import { authorizePermissions, requireActiveSociety } from '../middleware/authorize.middleware.js';
+import { handleValidationErrors } from '../validators/auth.validators.js';
+import { validateCollectPayment, validateReceiptId, validateReconcilePayment, validateReconciliationQuery, validateReversePayment } from '../validators/payment.validators.js';
+const router = express.Router(); router.use(authenticate, requireActiveSociety);
+router.get('/outstanding', authorizePermissions('society.payments.view'), outstandingBills);
+router.get('/', authorizePermissions('society.payments.view'), listPayments);
+router.post('/', authorizePermissions('society.payments.collect'), validateCollectPayment, handleValidationErrors, collectPayment);
+router.get('/reconciliation', authorizePermissions('society.payments.view'), validateReconciliationQuery, handleValidationErrors, reconciliation);
+router.patch('/:id/reconciliation', authorizePermissions('society.payments.reconcile'), validateReconcilePayment, handleValidationErrors, reconcilePayment);
+router.post('/:id/reverse', authorizePermissions('society.payments.reverse'), validateReversePayment, handleValidationErrors, reversePayment);
+router.get('/receipts/:id', authorizePermissions('society.payments.view'), validateReceiptId, handleValidationErrors, getReceipt);
+export default router;

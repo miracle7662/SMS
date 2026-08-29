@@ -1,0 +1,11 @@
+import service from '../services/payment.service.js';
+import { asyncHandler } from '../utils/async-handler.js';
+import { sendSuccess } from '../utils/api-response.js';
+const meta = (req) => ({ ipAddress: req.ip, userAgent: req.get('user-agent') });
+export const outstandingBills = asyncHandler(async (req, res) => sendSuccess(res, 200, 'Outstanding bills fetched successfully', await service.outstanding(req.auth.activeSocietyId)));
+export const collectPayment = asyncHandler(async (req, res) => sendSuccess(res, 201, 'Payment collected and receipt issued successfully', await service.collect(req.auth.activeSocietyId, req.body, req.auth.userId, meta(req))));
+export const listPayments = asyncHandler(async (req, res) => sendSuccess(res, 200, 'Payments fetched successfully', await service.list(req.auth.activeSocietyId)));
+export const getReceipt = asyncHandler(async (req, res) => sendSuccess(res, 200, 'Receipt fetched successfully', await service.receipt(req.auth.activeSocietyId, Number(req.params.id))));
+export const reversePayment = asyncHandler(async (req, res) => sendSuccess(res, 200, 'Payment reversed and receipt cancelled successfully', await service.reverse(req.auth.activeSocietyId, Number(req.params.id), req.body.reason, req.auth.userId, meta(req))));
+export const reconciliation = asyncHandler(async (req, res) => sendSuccess(res, 200, 'Reconciliation data fetched successfully', await service.reconciliation(req.auth.activeSocietyId, req.query.from, req.query.to)));
+export const reconcilePayment = asyncHandler(async (req, res) => sendSuccess(res, 200, 'Reconciliation status updated successfully', await service.reconcile(req.auth.activeSocietyId, Number(req.params.id), req.body, req.auth.userId, meta(req))));

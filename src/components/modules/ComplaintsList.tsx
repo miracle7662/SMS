@@ -1,53 +1,8 @@
 "use client";
-
-import { useRouter } from "next/navigation";
-import { Eye, UserPlus, CheckCircle2 } from "lucide-react";
-import { Card } from "@/components/ui/Card";
-import { DataTable, Column } from "@/components/ui/DataTable";
-import { StatusBadge, PriorityBadge } from "@/components/ui/Badge";
-import { complaints } from "@/lib/mock-data";
-import { Complaint } from "@/types";
-import { formatDate } from "@/lib/utils";
-
-export function ComplaintsList({ type, statuses }: { type?: Complaint["type"]; statuses?: Complaint["status"][] }) {
-  const router = useRouter();
-  let data = complaints;
-  if (type) data = data.filter((c) => c.type === type);
-  if (statuses) data = data.filter((c) => statuses.includes(c.status));
-
-  const columns: Column<Complaint>[] = [
-    { key: "complaintNo", header: "Complaint No." },
-    { key: "complainant", header: "Complainant" },
-    { key: "type", header: "Type" },
-    { key: "flatNo", header: "Flat" },
-    { key: "category", header: "Category" },
-    { key: "priority", header: "Priority", render: (c) => <PriorityBadge priority={c.priority} /> },
-    { key: "status", header: "Status", render: (c) => <StatusBadge status={c.status} /> },
-    { key: "createdDate", header: "Created", render: (c) => formatDate(c.createdDate), sortAccessor: (c) => c.createdDate },
-    { key: "assignedTo", header: "Assigned To", render: (c) => c.assignedTo ?? "Unassigned" },
-  ];
-
-  return (
-    <Card>
-      <DataTable
-        columns={columns}
-        data={data}
-        keyField="id"
-        searchPlaceholder="Search complaints..."
-        filters={[
-          { key: "status", label: "Status", options: ["Open", "In Progress", "Resolved", "Closed"] },
-          { key: "priority", label: "Priority", options: ["Low", "Medium", "High", "Urgent"] },
-          { key: "category", label: "Category", options: Array.from(new Set(complaints.map((c) => c.category))) },
-        ]}
-        onRowClick={(c) => router.push(`/complaints/${c.id}`)}
-        rowActions={[
-          { label: "View Details", icon: <Eye className="h-4 w-4" />, onClick: (c) => router.push(`/complaints/${c.id}`) },
-          { label: "Assign", icon: <UserPlus className="h-4 w-4" />, onClick: () => {} },
-          { label: "Mark Resolved", icon: <CheckCircle2 className="h-4 w-4" />, onClick: () => {} },
-        ]}
-        bulkActions={[{ label: "Assign", onClick: () => {} }, { label: "Close Selected", onClick: () => {} }]}
-        onExport={() => {}}
-      />
-    </Card>
-  );
-}
+import { useCallback,useEffect,useState } from "react";import { Eye,Plus,Send } from "lucide-react";import { Card } from "@/components/ui/Card";import { DataTable,Column } from "@/components/ui/DataTable";import { StatusBadge,PriorityBadge } from "@/components/ui/Badge";import { Button } from "@/components/ui/Button";import { Drawer } from "@/components/ui/Drawer";import { Input,Select,Textarea } from "@/components/ui/Input";import { formatDate,formatDateTime } from "@/lib/utils";import { getSocietySession } from "@/lib/session";
+const API_URL=process.env.NEXT_PUBLIC_API_URL??"http://localhost:5000/api/v1";type Complaint={id:number;complaint_number:string;complainant_name:string;complainant_type:string;flat_no:string;wing_name:string;building_name:string;category:string;title:string;description:string;priority:"LOW"|"MEDIUM"|"HIGH"|"URGENT";status:string;assigned_to:number|null;assigned_to_name:string|null;resolution_note:string|null;created_at:string;activity?:{id:number;activity_type:string;remark:string|null;performed_by_name:string;created_at:string}[]};type Options={flats:{id:number;label:string}[];assignees:{id:number;name:string}[]};const title=(v:string)=>v.charAt(0)+v.slice(1).toLowerCase().replaceAll("_"," ");
+export function ComplaintsList({type,statuses}:{type?:"Owner"|"Tenant";statuses?:string[]}){const[rows,setRows]=useState<Complaint[]>([]);const[options,setOptions]=useState<Options>({flats:[],assignees:[]});const[selected,setSelected]=useState<Complaint|null>(null);const[formOpen,setFormOpen]=useState(false);const[form,setForm]=useState({flat_id:"",category:"OTHER",title:"",description:"",priority:"MEDIUM"});const[workflow,setWorkflow]=useState({status:"",assigned_to:"",resolution_note:"",remark:""});const[error,setError]=useState("");const[notice,setNotice]=useState("");const[loading,setLoading]=useState(false);
+const load=useCallback(async()=>{const s=getSocietySession();if(!s?.accessToken)return setError("Please login and select a society.");try{const headers={Authorization:`Bearer ${s.accessToken}`};const[r,o]=await Promise.all([fetch(`${API_URL}/society/complaints`,{headers}),fetch(`${API_URL}/society/complaints/options`,{headers})]);const[j,k]=await Promise.all([r.json(),o.json()]);if(!r.ok||!j.success)throw new Error(j.message);if(!o.ok||!k.success)throw new Error(k.message);setRows(j.data??[]);setOptions(k.data??{flats:[],assignees:[]});}catch(e){setError(e instanceof Error?e.message:"Unable to load complaints.");}},[]);useEffect(()=>{void load();},[load]);
+async function create(){const s=getSocietySession();if(!s?.accessToken)return;if(!form.flat_id)return setError("Select a flat.");setLoading(true);setError("");try{const r=await fetch(`${API_URL}/society/complaints`,{method:"POST",headers:{"Content-Type":"application/json",Authorization:`Bearer ${s.accessToken}`},body:JSON.stringify({...form,flat_id:Number(form.flat_id)})});const j=await r.json();if(!r.ok||!j.success)throw new Error(j.message);setNotice(`Complaint ${j.data.complaint_number} raised successfully.`);setFormOpen(false);setForm({flat_id:"",category:"OTHER",title:"",description:"",priority:"MEDIUM"});await load();}catch(e){setError(e instanceof Error?e.message:"Unable to create complaint.");}finally{setLoading(false)}}async function view(c:Complaint){const s=getSocietySession();if(!s?.accessToken)return;const r=await fetch(`${API_URL}/society/complaints/${c.id}`,{headers:{Authorization:`Bearer ${s.accessToken}`}});const j=await r.json();if(!r.ok||!j.success)return setError(j.message);setSelected(j.data);setWorkflow({status:j.data.status,assigned_to:j.data.assigned_to?String(j.data.assigned_to):"",resolution_note:j.data.resolution_note||"",remark:""})}async function update(){if(!selected)return;const s=getSocietySession();if(!s?.accessToken)return;setLoading(true);setError("");try{const r=await fetch(`${API_URL}/society/complaints/${selected.id}/workflow`,{method:"PATCH",headers:{"Content-Type":"application/json",Authorization:`Bearer ${s.accessToken}`},body:JSON.stringify({status:workflow.status,assigned_to:workflow.assigned_to?Number(workflow.assigned_to):null,resolution_note:workflow.resolution_note||null,remark:workflow.remark||null})});const j=await r.json();if(!r.ok||!j.success)throw new Error(j.message);setSelected(j.data);setNotice("Complaint workflow updated successfully.");await load();}catch(e){setError(e instanceof Error?e.message:"You may not have permission to manage complaints.");}finally{setLoading(false)}}
+let data=rows;if(type)data=data.filter(c=>type==="Owner"?["OWNER","CO_OWNER"].includes(c.complainant_type):c.complainant_type==="TENANT");if(statuses)data=data.filter(c=>statuses.map(s=>s.toUpperCase().replaceAll(" ","_")).includes(c.status));const columns:Column<Complaint>[]=[{key:"complaint_number",header:"Complaint No."},{key:"complainant_name",header:"Complainant"},{key:"complainant_type",header:"Type",render:c=>title(c.complainant_type)},{key:"flat_no",header:"Flat",render:c=>`${c.wing_name}-${c.flat_no}`},{key:"category",header:"Category",render:c=>title(c.category)},{key:"priority",header:"Priority",render:c=><PriorityBadge priority={title(c.priority) as "Low"|"Medium"|"High"|"Urgent"}/>},{key:"status",header:"Status",render:c=><StatusBadge status={title(c.status)}/>},{key:"created_at",header:"Created",render:c=>formatDate(c.created_at)},{key:"assigned_to_name",header:"Assigned To",render:c=>c.assigned_to_name||"Unassigned"}];
+return <>{error&&<p className="mb-4 rounded-md bg-[var(--color-danger)]/10 p-3 text-sm text-[var(--color-danger)]">{error}</p>}{notice&&<p className="mb-4 rounded-md bg-[var(--color-success)]/10 p-3 text-sm text-[var(--color-success)]">{notice}</p>}<Card><DataTable columns={columns} data={data} keyField="id" searchFields={["complaint_number","complainant_name","flat_no","title","category"]} filters={[{key:"status",label:"Status",options:["OPEN","ASSIGNED","IN_PROGRESS","RESOLVED","CLOSED","REOPENED","CANCELLED"]},{key:"priority",label:"Priority",options:["LOW","MEDIUM","HIGH","URGENT"]}]} addButton={<Button size="sm" onClick={()=>setFormOpen(true)}><Plus className="h-4 w-4"/> Raise Complaint</Button>} onRowClick={c=>void view(c)} rowActions={[{label:"View / Manage",icon:<Eye className="h-4 w-4"/>,onClick:c=>void view(c)}]}/></Card><Drawer open={formOpen} onClose={()=>setFormOpen(false)} title="Raise Complaint" width="580px" footer={<><Button variant="outline" onClick={()=>setFormOpen(false)}>Cancel</Button><Button onClick={()=>void create()} loading={loading}>Submit Complaint</Button></>}><div className="flex flex-col gap-4"><Select label="Flat" required value={form.flat_id} onChange={e=>setForm({...form,flat_id:e.target.value})} placeholder="Select flat" options={options.flats.map(f=>({value:String(f.id),label:f.label}))}/><div className="grid grid-cols-2 gap-4"><Select label="Category" value={form.category} onChange={e=>setForm({...form,category:e.target.value})} options={["PLUMBING","ELECTRICAL","HOUSEKEEPING","SECURITY","LIFT","PARKING","CIVIL","WATER","OTHER"].map(v=>({value:v,label:title(v)}))}/><Select label="Priority" value={form.priority} onChange={e=>setForm({...form,priority:e.target.value})} options={["LOW","MEDIUM","HIGH","URGENT"].map(v=>({value:v,label:title(v)}))}/></div><Input label="Subject" required value={form.title} onChange={e=>setForm({...form,title:e.target.value})}/><Textarea label="Description" required value={form.description} onChange={e=>setForm({...form,description:e.target.value})}/></div></Drawer><Drawer open={Boolean(selected)} onClose={()=>setSelected(null)} title={selected?.complaint_number||"Complaint"} description={selected?`${selected.building_name} / ${selected.wing_name}-${selected.flat_no}`:""} width="680px" footer={options.assignees.length?<Button onClick={()=>void update()} loading={loading}>Update Workflow</Button>:<Button onClick={()=>setSelected(null)}>Close</Button>}>{selected&&<div className="space-y-5"><div><div className="flex gap-2"><PriorityBadge priority={title(selected.priority) as "Low"|"Medium"|"High"|"Urgent"}/><StatusBadge status={title(selected.status)}/></div><h3 className="mt-3 font-semibold">{selected.title}</h3><p className="mt-2 whitespace-pre-wrap text-sm text-[var(--color-text-secondary)]">{selected.description}</p></div>{options.assignees.length>0&&<div className="grid grid-cols-2 gap-4"><Select label="Assigned To" value={workflow.assigned_to} onChange={e=>setWorkflow({...workflow,assigned_to:e.target.value})} placeholder="Unassigned" options={options.assignees.map(u=>({value:String(u.id),label:u.name}))}/><Select label="Status" value={workflow.status} onChange={e=>setWorkflow({...workflow,status:e.target.value})} options={["OPEN","ASSIGNED","IN_PROGRESS","RESOLVED","CLOSED","REOPENED","CANCELLED"].map(v=>({value:v,label:title(v)}))}/><Textarea label="Resolution Note" wrapperClassName="col-span-2" value={workflow.resolution_note} onChange={e=>setWorkflow({...workflow,resolution_note:e.target.value})}/><Textarea label="Internal Remark" wrapperClassName="col-span-2" value={workflow.remark} onChange={e=>setWorkflow({...workflow,remark:e.target.value})}/></div>}<div><h4 className="mb-3 text-sm font-semibold">Activity History</h4><div className="space-y-3">{selected.activity?.map(a=><div key={a.id} className="border-l-2 border-[var(--color-primary)] pl-3"><p className="text-sm font-medium">{title(a.activity_type)}</p><p className="text-xs text-[var(--color-text-secondary)]">{a.performed_by_name||"User"} · {formatDateTime(a.created_at)}</p>{a.remark&&<p className="mt-1 text-sm">{a.remark}</p>}</div>)}</div></div></div>}</Drawer></>}

@@ -4,6 +4,7 @@ import { Status } from "@/types";
 const statusMap: Record<string, { bg: string; text: string; dot: string }> = {
   Active: { bg: "bg-[var(--color-success-bg)]", text: "text-[var(--color-success)]", dot: "bg-[var(--color-success)]" },
   Paid: { bg: "bg-[var(--color-success-bg)]", text: "text-[var(--color-success)]", dot: "bg-[var(--color-success)]" },
+  Success: { bg: "bg-[var(--color-success-bg)]", text: "text-[var(--color-success)]", dot: "bg-[var(--color-success)]" },
   Resolved: { bg: "bg-[var(--color-success-bg)]", text: "text-[var(--color-success)]", dot: "bg-[var(--color-success)]" },
   Verified: { bg: "bg-[var(--color-success-bg)]", text: "text-[var(--color-success)]", dot: "bg-[var(--color-success)]" },
   Published: { bg: "bg-[var(--color-success-bg)]", text: "text-[var(--color-success)]", dot: "bg-[var(--color-success)]" },
@@ -14,6 +15,8 @@ const statusMap: Record<string, { bg: string; text: string; dot: string }> = {
   Closed: { bg: "bg-slate-100", text: "text-slate-500", dot: "bg-slate-400" },
   Vacant: { bg: "bg-slate-100", text: "text-slate-500", dot: "bg-slate-400" },
   Draft: { bg: "bg-slate-100", text: "text-slate-500", dot: "bg-slate-400" },
+  Reversed: { bg: "bg-slate-100", text: "text-slate-500", dot: "bg-slate-400" },
+  Cancelled: { bg: "bg-slate-100", text: "text-slate-500", dot: "bg-slate-400" },
 
   Pending: { bg: "bg-[var(--color-warning-bg)]", text: "text-[var(--color-warning)]", dot: "bg-[var(--color-warning)]" },
   "In Progress": { bg: "bg-[var(--color-warning-bg)]", text: "text-[var(--color-warning)]", dot: "bg-[var(--color-warning)]" },

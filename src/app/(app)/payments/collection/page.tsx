@@ -1,74 +1,8 @@
 "use client";
-
-import { useState } from "react";
-import { IndianRupee, Search } from "lucide-react";
-import { PageHeader } from "@/components/layout/PageHeader";
-import { Card, CardHeader, CardBody } from "@/components/ui/Card";
-import { Button } from "@/components/ui/Button";
-import { Input, Select, Radio } from "@/components/ui/Input";
-import { StatusBadge } from "@/components/ui/Badge";
-import { maintenanceBills } from "@/lib/mock-data";
-import { formatCurrency, formatDate } from "@/lib/utils";
-
-export default function CollectionPage() {
-  const [mode, setMode] = useState("UPI");
-  const pendingBills = maintenanceBills.filter((b) => b.status !== "Paid").slice(0, 6);
-
-  return (
-    <div>
-      <PageHeader title="Collection" description="Record a maintenance payment against an outstanding bill" />
-
-      <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
-        <Card className="lg:col-span-2">
-          <CardHeader title="Record Payment" />
-          <CardBody className="flex flex-col gap-4">
-            <Input label="Search Flat / Bill No." icon={<Search className="h-4 w-4" />} placeholder="e.g. A-1203 or GVH/2026-27/1002" />
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <Select label="Flat" required options={maintenanceBills.slice(0, 10).map((b) => ({ label: `${b.flatNo} — ${b.ownerName}`, value: b.flatNo }))} />
-              <Input label="Bill No." disabled placeholder="Auto-filled" />
-              <Input label="Amount (₹)" type="number" required icon={<IndianRupee className="h-4 w-4" />} placeholder="4500" />
-              <Input label="Payment Date" type="date" required />
-            </div>
-            <div>
-              <label className="mb-2 block text-sm font-medium text-[var(--color-text)]">Payment Mode</label>
-              <div className="flex flex-wrap gap-4">
-                {["Cash", "Cheque", "NEFT", "UPI", "Card", "Online"].map((m) => (
-                  <Radio key={m} name="mode" checked={mode === m} onChange={() => setMode(m)} label={m} />
-                ))}
-              </div>
-            </div>
-            {mode === "Cheque" && (
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                <Input label="Cheque Number" />
-                <Input label="Bank Name" />
-              </div>
-            )}
-            {(mode === "UPI" || mode === "NEFT" || mode === "Online") && <Input label="Transaction / UTR Reference No." />}
-            <div className="flex justify-end gap-2 pt-2">
-              <Button variant="outline">Save & New</Button>
-              <Button>Record Payment</Button>
-            </div>
-          </CardBody>
-        </Card>
-
-        <Card>
-          <CardHeader title="Outstanding Bills" description="Quick reference" />
-          <div className="divide-y divide-[var(--color-border)]">
-            {pendingBills.map((b) => (
-              <div key={b.id} className="flex items-center justify-between px-5 py-3">
-                <div>
-                  <p className="text-sm font-medium text-[var(--color-text)]">{b.flatNo}</p>
-                  <p className="text-xs text-[var(--color-text-secondary)]">Due {formatDate(b.dueDate)}</p>
-                </div>
-                <div className="text-right">
-                  <p className="text-sm font-semibold text-[var(--color-text)]">{formatCurrency(b.amount)}</p>
-                  <StatusBadge status={b.status} />
-                </div>
-              </div>
-            ))}
-          </div>
-        </Card>
-      </div>
-    </div>
-  );
-}
+import { useCallback,useEffect,useMemo,useState } from "react";import { IndianRupee } from "lucide-react";import { PageHeader } from "@/components/layout/PageHeader";import { Card,CardBody,CardHeader } from "@/components/ui/Card";import { Button } from "@/components/ui/Button";import { Input,Select,Radio } from "@/components/ui/Input";import { formatCurrency,formatDate } from "@/lib/utils";import { getSocietySession } from "@/lib/session";
+const API_URL=process.env.NEXT_PUBLIC_API_URL??"http://localhost:5000/api/v1";type Bill={id:number;bill_number:string;flat_no:string;wing_name:string;building_name:string;recipient_name:string|null;recipient_mobile:string|null;recipient_email:string|null;due_date:string;balance_amount:number;status:string};const today=()=>new Date().toISOString().slice(0,10);
+export default function CollectionPage(){const[bills,setBills]=useState<Bill[]>([]);const[billId,setBillId]=useState("");const[amount,setAmount]=useState("");const[date,setDate]=useState(today());const[mode,setMode]=useState("UPI");const[reference,setReference]=useState("");const[bank,setBank]=useState("");const[chequeDate,setChequeDate]=useState("");const[notes,setNotes]=useState("");const[error,setError]=useState("");const[success,setSuccess]=useState("");const[loading,setLoading]=useState(false);const selected=useMemo(()=>bills.find(b=>String(b.id)===billId),[bills,billId]);
+const load=useCallback(async()=>{const s=getSocietySession();if(!s?.accessToken)return setError("Please login and select a society.");try{const r=await fetch(`${API_URL}/society/payments/outstanding`,{headers:{Authorization:`Bearer ${s.accessToken}`}});const j=await r.json();if(!r.ok||!j.success)throw new Error(j.message);setBills(j.data??[]);}catch(e){setError(e instanceof Error?e.message:"Unable to load outstanding bills.");}},[]);useEffect(()=>{void load();},[load]);
+function choose(value:string){setBillId(value);const bill=bills.find(b=>String(b.id)===value);setAmount(bill?String(bill.balance_amount):"");setError("");setSuccess("");}
+async function submit(e:React.FormEvent){e.preventDefault();const s=getSocietySession();if(!s?.accessToken||!selected)return setError("Select an outstanding bill.");const value=Number(amount);if(value<=0||value>selected.balance_amount)return setError(`Amount must be between ₹0.01 and ${formatCurrency(selected.balance_amount)}.`);setLoading(true);setError("");setSuccess("");try{const r=await fetch(`${API_URL}/society/payments`,{method:"POST",headers:{"Content-Type":"application/json",Authorization:`Bearer ${s.accessToken}`},body:JSON.stringify({payment_date:date,payment_mode:mode,reference_number:reference||null,bank_name:bank||null,cheque_date:chequeDate||null,total_amount:value,payer_name:selected.recipient_name,payer_mobile:selected.recipient_mobile,payer_email:selected.recipient_email,notes:notes||null,allocations:[{bill_id:selected.id,amount:value}]})});const j=await r.json();if(!r.ok||!j.success)throw new Error(j.message);setSuccess(`Payment recorded. Receipt: ${j.data.receipt_number}`);setBillId("");setAmount("");setReference("");setBank("");setChequeDate("");setNotes("");await load();}catch(e){setError(e instanceof Error?e.message:"Unable to record payment.");}finally{setLoading(false);}}
+return <div><PageHeader title="Collection" description="Record full or partial payment and issue a receipt"/>{error&&<p className="mb-4 rounded-md bg-[var(--color-danger)]/10 p-3 text-sm text-[var(--color-danger)]">{error}</p>}{success&&<p className="mb-4 rounded-md bg-[var(--color-success)]/10 p-3 text-sm text-[var(--color-success)]">{success}</p>}<div className="grid grid-cols-1 gap-5 lg:grid-cols-3"><Card className="lg:col-span-2"><CardHeader title="Record Payment"/><CardBody><form className="flex flex-col gap-4" onSubmit={submit}><Select label="Outstanding Bill" required value={billId} onChange={e=>choose(e.target.value)} placeholder="Select flat / bill" options={bills.map(b=>({value:String(b.id),label:`${b.wing_name}-${b.flat_no} · ${b.bill_number} · ${formatCurrency(b.balance_amount)}`}))}/>{selected&&<div className="rounded-md bg-[var(--color-bg)] p-3 text-sm"><strong>{selected.recipient_name||"Member"}</strong> · {selected.building_name} · Due {formatDate(selected.due_date)} · Balance {formatCurrency(selected.balance_amount)}</div>}<div className="grid grid-cols-1 gap-4 sm:grid-cols-2"><Input label="Amount (₹)" type="number" min="0.01" step="0.01" max={selected?.balance_amount} required icon={<IndianRupee className="h-4 w-4"/>} value={amount} onChange={e=>setAmount(e.target.value)}/><Input label="Payment Date" type="date" required value={date} onChange={e=>setDate(e.target.value)}/></div><div><label className="mb-2 block text-sm font-medium">Payment Mode</label><div className="flex flex-wrap gap-4">{["CASH","CHEQUE","NEFT","RTGS","UPI","CARD","ONLINE"].map(m=><Radio key={m} name="mode" checked={mode===m} onChange={()=>setMode(m)} label={m}/>)}</div></div>{mode!=="CASH"&&<Input label={mode==="CHEQUE"?"Cheque Number":"Transaction / UTR Reference"} required value={reference} onChange={e=>setReference(e.target.value)}/>} {mode==="CHEQUE"&&<div className="grid grid-cols-1 gap-4 sm:grid-cols-2"><Input label="Bank Name" required value={bank} onChange={e=>setBank(e.target.value)}/><Input label="Cheque Date" type="date" required value={chequeDate} onChange={e=>setChequeDate(e.target.value)}/></div>}<Input label="Notes" value={notes} onChange={e=>setNotes(e.target.value)}/><div className="flex justify-end"><Button type="submit" loading={loading} disabled={!selected}>Record Payment & Issue Receipt</Button></div></form></CardBody></Card><Card><CardHeader title="Outstanding Bills" description={`${bills.length} bill(s)`}/><div className="max-h-[520px] divide-y divide-[var(--color-border)] overflow-auto">{bills.map(b=><button type="button" key={b.id} onClick={()=>choose(String(b.id))} className="flex w-full items-center justify-between px-5 py-3 text-left hover:bg-[var(--color-bg)]"><div><p className="text-sm font-medium">{b.wing_name}-{b.flat_no}</p><p className="text-xs text-[var(--color-text-secondary)]">{b.bill_number} · Due {formatDate(b.due_date)}</p></div><p className="text-sm font-semibold">{formatCurrency(b.balance_amount)}</p></button>)}{!bills.length&&<p className="p-5 text-sm text-[var(--color-text-secondary)]">No outstanding bills.</p>}</div></Card></div></div>}

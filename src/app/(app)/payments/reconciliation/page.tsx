@@ -1,48 +1,8 @@
 "use client";
-
-import { CheckCircle2, AlertCircle } from "lucide-react";
-import { PageHeader } from "@/components/layout/PageHeader";
-import { Card, CardHeader, CardBody } from "@/components/ui/Card";
-import { Button } from "@/components/ui/Button";
-import { payments } from "@/lib/mock-data";
-import { formatCurrency, formatDate } from "@/lib/utils";
-
-export default function ReconciliationPage() {
-  const bankStatementTotal = payments.reduce((s, p) => s + p.amount, 0) - 4500;
-  const systemTotal = payments.reduce((s, p) => s + p.amount, 0);
-  const matched = payments.length - 1;
-
-  return (
-    <div>
-      <PageHeader title="Reconciliation" description="Match recorded payments against bank statement entries" actions={<Button>Upload Bank Statement</Button>} />
-
-      <div className="mb-5 grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <Card><CardBody><p className="text-xs text-[var(--color-text-secondary)]">System Total</p><p className="mt-1 text-xl font-semibold text-[var(--color-text)]">{formatCurrency(systemTotal)}</p></CardBody></Card>
-        <Card><CardBody><p className="text-xs text-[var(--color-text-secondary)]">Bank Statement Total</p><p className="mt-1 text-xl font-semibold text-[var(--color-text)]">{formatCurrency(bankStatementTotal)}</p></CardBody></Card>
-        <Card><CardBody><p className="text-xs text-[var(--color-text-secondary)]">Unmatched Amount</p><p className="mt-1 text-xl font-semibold text-[var(--color-danger)]">{formatCurrency(systemTotal - bankStatementTotal)}</p></CardBody></Card>
-      </div>
-
-      <Card>
-        <CardHeader title="Reconciliation Status" description={`${matched} of ${payments.length} transactions matched`} />
-        <div className="divide-y divide-[var(--color-border)]">
-          {payments.map((p, i) => (
-            <div key={p.id} className="flex items-center justify-between px-5 py-3">
-              <div className="flex items-center gap-3">
-                {i === payments.length - 1 ? (
-                  <AlertCircle className="h-4 w-4 text-[var(--color-warning)]" />
-                ) : (
-                  <CheckCircle2 className="h-4 w-4 text-[var(--color-success)]" />
-                )}
-                <div>
-                  <p className="text-sm font-medium text-[var(--color-text)]">{p.receiptNo} — {p.payerName}</p>
-                  <p className="text-xs text-[var(--color-text-secondary)]">{formatDate(p.date)}</p>
-                </div>
-              </div>
-              <span className="text-sm font-semibold text-[var(--color-text)]">{formatCurrency(p.amount)}</span>
-            </div>
-          ))}
-        </div>
-      </Card>
-    </div>
-  );
-}
+import { useCallback,useEffect,useState } from "react";import { CheckCircle2,AlertCircle,RotateCcw } from "lucide-react";import { PageHeader } from "@/components/layout/PageHeader";import { Card,CardHeader,CardBody } from "@/components/ui/Card";import { Button } from "@/components/ui/Button";import { Input } from "@/components/ui/Input";import { formatCurrency,formatDate } from "@/lib/utils";import { getSocietySession } from "@/lib/session";
+const API_URL=process.env.NEXT_PUBLIC_API_URL??"http://localhost:5000/api/v1";const iso=(date:Date)=>date.toISOString().slice(0,10);const start=()=>{const d=new Date();d.setUTCDate(1);return iso(d);};type Row={id:number;receipt_number:string;payer_name:string;wing_name:string;flat_no:string;payment_date:string;payment_mode:string;reference_number:string|null;total_amount:number;status:string;reconciliation_status:string};type Data={summary:{system_total:number;matched_total:number;unmatched_total:number;matched_count:number;total_count:number};transactions:Row[]};
+export default function ReconciliationPage(){const[from,setFrom]=useState(start());const[to,setTo]=useState(iso(new Date()));const[data,setData]=useState<Data>({summary:{system_total:0,matched_total:0,unmatched_total:0,matched_count:0,total_count:0},transactions:[]});const[error,setError]=useState("");const[loading,setLoading]=useState(false);
+const load=useCallback(async()=>{const s=getSocietySession();if(!s?.accessToken)return setError("Please login and select a society.");setLoading(true);setError("");try{const r=await fetch(`${API_URL}/society/payments/reconciliation?from=${from}&to=${to}`,{headers:{Authorization:`Bearer ${s.accessToken}`}});const j=await r.json();if(!r.ok||!j.success)throw new Error(j.message);setData(j.data);}catch(e){setError(e instanceof Error?e.message:"Unable to load reconciliation.");}finally{setLoading(false);}},[from,to]);useEffect(()=>{void load();},[load]);
+async function update(row:Row,status:"MATCHED"|"UNMATCHED"){const s=getSocietySession();if(!s?.accessToken)return;let reference:string|null=null;if(status==="MATCHED"){reference=window.prompt("Bank statement reference (optional):",row.reference_number||"");if(reference===null)return;}const r=await fetch(`${API_URL}/society/payments/${row.id}/reconciliation`,{method:"PATCH",headers:{"Content-Type":"application/json",Authorization:`Bearer ${s.accessToken}`},body:JSON.stringify({status,reference:reference||null})});const j=await r.json();if(!r.ok||!j.success)return setError(j.message||"Unable to update reconciliation.");await load();}
+return <div><PageHeader title="Reconciliation" description="Match society payments against bank statement entries" actions={<Button onClick={()=>void load()} loading={loading}><RotateCcw className="h-4 w-4"/> Refresh</Button>}/>{error&&<p className="mb-4 rounded-md bg-[var(--color-danger)]/10 p-3 text-sm text-[var(--color-danger)]">{error}</p>}<Card className="mb-5"><CardBody><div className="grid grid-cols-1 gap-4 sm:grid-cols-3"><Input label="From Date" type="date" value={from} onChange={e=>setFrom(e.target.value)}/><Input label="To Date" type="date" value={to} onChange={e=>setTo(e.target.value)}/><div className="flex items-end"><Button className="w-full" onClick={()=>void load()} loading={loading}>Load Payments</Button></div></div></CardBody></Card><div className="mb-5 grid grid-cols-1 gap-4 sm:grid-cols-3"><Summary label="System Total" value={data.summary.system_total}/><Summary label="Matched Total" value={data.summary.matched_total} tone="success"/><Summary label="Unmatched Total" value={data.summary.unmatched_total} tone="danger"/></div><Card><CardHeader title="Reconciliation Status" description={`${data.summary.matched_count} of ${data.summary.total_count} successful payments matched`}/><div className="divide-y divide-[var(--color-border)]">{data.transactions.map(row=><div key={row.id} className="flex flex-col gap-3 px-5 py-3 sm:flex-row sm:items-center sm:justify-between"><div className="flex items-center gap-3">{row.reconciliation_status==="MATCHED"?<CheckCircle2 className="h-5 w-5 text-[var(--color-success)]"/>:<AlertCircle className="h-5 w-5 text-[var(--color-warning)]"/>}<div><p className="text-sm font-medium">{row.receipt_number} — {row.payer_name}</p><p className="text-xs text-[var(--color-text-secondary)]">{row.wing_name}-{row.flat_no} · {formatDate(row.payment_date)} · {row.payment_mode} · {row.status}</p></div></div><div className="flex items-center justify-between gap-3 sm:justify-end"><strong>{formatCurrency(row.total_amount)}</strong>{row.status==="SUCCESS"&&(row.reconciliation_status==="MATCHED"?<Button size="sm" variant="outline" onClick={()=>void update(row,"UNMATCHED")}>Unmatch</Button>:<Button size="sm" onClick={()=>void update(row,"MATCHED")}>Mark Matched</Button>)}</div></div>)}{!data.transactions.length&&<p className="p-5 text-sm text-[var(--color-text-secondary)]">No payments found for this date range.</p>}</div></Card></div>}
+function Summary({label,value,tone}:{label:string;value:number;tone?:"success"|"danger"}){const color=tone==="success"?"text-[var(--color-success)]":tone==="danger"?"text-[var(--color-danger)]":"";return <Card><CardBody><p className="text-xs text-[var(--color-text-secondary)]">{label}</p><p className={`mt-1 text-xl font-semibold ${color}`}>{formatCurrency(value)}</p></CardBody></Card>}

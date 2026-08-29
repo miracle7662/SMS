@@ -14,6 +14,12 @@ import chargeTypeRoutes from './charge-type.routes.js';
 import chargeRuleRoutes from './charge-rule.routes.js';
 import maintenancePreviewRoutes from './maintenance-preview.routes.js';
 import maintenanceBillRoutes from './maintenance-bill.routes.js';
+import paymentRoutes from './payment.routes.js';
+import duesRoutes from './dues.routes.js';
+import maintenanceReportRoutes from './maintenance-report.routes.js';
+import noticeRoutes from './notice.routes.js';
+import complaintRoutes from './complaint.routes.js';
+import visitorRoutes from './visitor.routes.js';
 
 const router = express.Router();
 
@@ -34,6 +40,12 @@ router.use('/society/maintenance/charge-types', chargeTypeRoutes);
 router.use('/society/maintenance/charge-rules', chargeRuleRoutes);
 router.use('/society/maintenance/preview', maintenancePreviewRoutes);
 router.use('/society/maintenance/bills', maintenanceBillRoutes);
+router.use('/society/payments', paymentRoutes);
+router.use('/society/maintenance/dues', duesRoutes);
+router.use('/society/reports', maintenanceReportRoutes);
+router.use('/society/notices', noticeRoutes);
+router.use('/society/complaints', complaintRoutes);
+router.use('/society/visitors', visitorRoutes);
 router.use('/society', societyProfileRoutes);
 
 export default router;
