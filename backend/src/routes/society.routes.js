@@ -2,7 +2,7 @@ import express from 'express';
 import { 
   getSocieties,      // ✅ Only these 2 exist
   selectSociety      // ✅ Only these 2 exist
-} from '../controllers/society.controller.js';
+} from '../controllers/auth.controller.js';
 import { authenticate } from '../middleware/authenticate.middleware.js';
 
 const router = express.Router();

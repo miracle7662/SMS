@@ -57,7 +57,9 @@ export class AuthService {
     const societies = await societyAccessRepository.getUserSocieties(user.id);
 
     // Determine if society selection is required
-    const requiresSocietySelection = societies.length > 1;
+    const userPlatformRoles = await societyAccessRepository.getUserRoles(user.id);
+    const isSuperAdmin = userPlatformRoles.some((role) => role.role_code === 'SUPER_ADMIN');
+    const requiresSocietySelection = isSuperAdmin || societies.length > 1;
     let defaultSociety = null;
 
     if (societies.length === 1) {
@@ -65,9 +67,12 @@ export class AuthService {
     }
 
     // Generate tokens
+    const tokenRoles = defaultSociety
+      ? await societyAccessRepository.getUserRoles(user.id, defaultSociety.society_id)
+      : userPlatformRoles;
     const accessTokenPayload = {
       sub: user.id,
-      roles: (await societyAccessRepository.getUserRoles(user.id)).map(r => r.role_code),
+      roles: tokenRoles.map(r => r.role_code),
       activeSocietyId: defaultSociety ? defaultSociety.society_id : null,
       tokenType: 'access',
     };
@@ -101,7 +106,7 @@ export class AuthService {
         email: user.email,
         profileImage: user.profile_image,
       },
-      platformRoles: (await societyAccessRepository.getUserRoles(user.id)).map(r => r.role_code),
+      platformRoles: userPlatformRoles.map(r => r.role_code),
       societies: societies.map(s => ({
         id: s.society_id,
         code: s.society_code,
@@ -273,6 +278,10 @@ export class AuthService {
     }
 
     return await societyAccessRepository.getUserSocieties(userId);
+  }
+
+  async getAllActiveSocieties() {
+    return societyAccessRepository.getAllActiveSocieties();
   }
 }
 
