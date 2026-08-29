@@ -1,57 +1,17 @@
 "use client";
-
-import { Eye, Download, Upload } from "lucide-react";
-import { PageHeader } from "@/components/layout/PageHeader";
-import { Card } from "@/components/ui/Card";
-import { Button } from "@/components/ui/Button";
-import { DataTable, Column } from "@/components/ui/DataTable";
-import { StatusBadge } from "@/components/ui/Badge";
-import { tenants } from "@/lib/mock-data";
-import { Tenant } from "@/types";
-
-interface DocRow {
-  id: string;
-  memberName: string;
-  flatNo: string;
-  docType: string;
-  status: string;
-}
-
-const docs: DocRow[] = tenants.flatMap((t: Tenant, i) => [
-  { id: `${t.id}-agreement`, memberName: t.name, flatNo: t.flatNo, docType: "Legal Rent Agreement", status: t.agreementStatus },
-  { id: `${t.id}-noc`, memberName: t.name, flatNo: t.flatNo, docType: "Police NOC", status: t.policeNoc },
-  { id: `${t.id}-aadhaar`, memberName: t.name, flatNo: t.flatNo, docType: "Aadhaar Card", status: i % 3 === 0 ? "Pending" : "Verified" },
-]);
-
-export default function MemberDocumentsPage() {
-  const columns: Column<DocRow>[] = [
-    { key: "memberName", header: "Member" },
-    { key: "flatNo", header: "Flat No." },
-    { key: "docType", header: "Document Type" },
-    { key: "status", header: "Status", render: (d) => <StatusBadge status={d.status} /> },
-  ];
-
-  return (
-    <div>
-      <PageHeader
-        title="Member Documents"
-        description="Identity, agreement, and verification documents for members and tenants"
-        actions={<Button><Upload className="h-4 w-4" /> Upload Document</Button>}
-      />
-      <Card>
-        <DataTable
-          columns={columns}
-          data={docs}
-          keyField="id"
-          searchPlaceholder="Search documents..."
-          filters={[{ key: "docType", label: "Document Type", options: ["Legal Rent Agreement", "Police NOC", "Aadhaar Card"] }, { key: "status", label: "Status", options: ["Uploaded", "Verified", "Pending", "Expired"] }]}
-          rowActions={[
-            { label: "View", icon: <Eye className="h-4 w-4" />, onClick: () => {} },
-            { label: "Download", icon: <Download className="h-4 w-4" />, onClick: () => {} },
-          ]}
-          onExport={() => {}}
-        />
-      </Card>
-    </div>
-  );
-}
+import { FormEvent, useCallback, useEffect, useState } from "react";
+import { Check, Download, Trash2, Upload, X } from "lucide-react";
+import { PageHeader } from "@/components/layout/PageHeader"; import { Card } from "@/components/ui/Card"; import { Button } from "@/components/ui/Button"; import { Column, DataTable } from "@/components/ui/DataTable"; import { Drawer } from "@/components/ui/Drawer"; import { Input, Select } from "@/components/ui/Input"; import { StatusBadge } from "@/components/ui/Badge"; import { formatDate } from "@/lib/utils"; import { getSocietySession } from "@/lib/session";
+const API_URL=process.env.NEXT_PUBLIC_API_URL??"http://localhost:5000/api/v1";
+type Option={member_id:number;name:string;flat_id:number;flat_no:string;building_name:string;wing_name:string}; type Row={id:number;member_name:string;flat_no:string;wing_name:string;document_type:string;original_file_name:string;file_size:number;status:string;expiry_date:string|null;created_at:string};
+const types=["AADHAAR","PAN","PHOTO","SALE_DEED","SHARE_CERTIFICATE","RENT_AGREEMENT","POLICE_NOC","OTHER"];
+export default function MemberDocumentsPage(){const[rows,setRows]=useState<Row[]>([]);const[options,setOptions]=useState<Option[]>([]);const[open,setOpen]=useState(false);const[saving,setSaving]=useState(false);const[error,setError]=useState("");const[success,setSuccess]=useState("");const[form,setForm]=useState({member_id:"",flat_id:"",document_type:"AADHAAR",document_number:"",expiry_date:"",file:null as File|null});
+const load=useCallback(async()=>{const s=getSocietySession();if(!s?.accessToken)return setError("Please login and select a society.");try{const h={Authorization:`Bearer ${s.accessToken}`};const[a,b]=await Promise.all([fetch(`${API_URL}/society/member-management/documents`,{headers:h}),fetch(`${API_URL}/society/member-management/member-options`,{headers:h})]);const[x,y]=await Promise.all([a.json(),b.json()]);if(!a.ok||!x.success)throw new Error(x.message);if(!b.ok||!y.success)throw new Error(y.message);setRows(x.data??[]);setOptions(y.data??[]);}catch(e){setError(e instanceof Error?e.message:"Unable to load documents.");}},[]);useEffect(()=>{void load();},[load]);
+const toBase64=(file:File)=>new Promise<string>((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(String(r.result));r.onerror=reject;r.readAsDataURL(file);});
+async function submit(e:FormEvent){e.preventDefault();const s=getSocietySession();if(!s?.accessToken||!form.file)return setError("Select a document file.");if(form.file.size>5*1024*1024)return setError("Maximum file size is 5 MB.");setSaving(true);try{const file_base64=await toBase64(form.file);const r=await fetch(`${API_URL}/society/member-management/documents`,{method:"POST",headers:{"Content-Type":"application/json",Authorization:`Bearer ${s.accessToken}`},body:JSON.stringify({...form,file:undefined,member_id:Number(form.member_id),flat_id:Number(form.flat_id),file_name:form.file.name,mime_type:form.file.type,file_base64})});const j=await r.json();if(!r.ok||!j.success)throw new Error(Array.isArray(j.errors)?j.errors.join(", "):j.message);setOpen(false);setSuccess("Document uploaded for verification.");await load();}catch(x){setError(x instanceof Error?x.message:"Upload failed.");}finally{setSaving(false);}}
+async function status(row:Row,value:"VERIFIED"|"REJECTED"){const s=getSocietySession();if(!s?.accessToken)return;const reason=value==="REJECTED"?(prompt("Rejection reason")||""):"";const r=await fetch(`${API_URL}/society/member-management/documents/${row.id}/status`,{method:"PATCH",headers:{"Content-Type":"application/json",Authorization:`Bearer ${s.accessToken}`},body:JSON.stringify({status:value,rejection_reason:reason})});const j=await r.json();if(!r.ok||!j.success)return setError(j.message);setSuccess(`Document ${value.toLowerCase()}.`);await load();}
+async function download(row:Row){const s=getSocietySession();if(!s?.accessToken)return;const r=await fetch(`${API_URL}/society/member-management/documents/${row.id}/download`,{headers:{Authorization:`Bearer ${s.accessToken}`}});if(!r.ok)return setError("Unable to open document.");const url=URL.createObjectURL(await r.blob());window.open(url,"_blank","noopener,noreferrer");setTimeout(()=>URL.revokeObjectURL(url),60000);}
+async function remove(row:Row){if(!confirm(`Delete ${row.original_file_name}?`))return;const s=getSocietySession();if(!s?.accessToken)return;const r=await fetch(`${API_URL}/society/member-management/documents/${row.id}`,{method:"DELETE",headers:{Authorization:`Bearer ${s.accessToken}`}});const j=await r.json();if(!r.ok||!j.success)return setError(j.message);setSuccess("Document deleted.");await load();}
+const columns:Column<Row>[]=[{key:"member_name",header:"Member"},{key:"flat_no",header:"Flat",render:r=>`${r.wing_name}-${r.flat_no}`},{key:"document_type",header:"Document",render:r=>r.document_type.replaceAll("_"," ")},{key:"original_file_name",header:"File"},{key:"file_size",header:"Size",render:r=>`${(Number(r.file_size)/1024).toFixed(1)} KB`},{key:"expiry_date",header:"Expiry",render:r=>r.expiry_date?formatDate(r.expiry_date):"—"},{key:"status",header:"Status",render:r=><StatusBadge status={r.status}/>}];
+return <div><PageHeader title="Member Documents" description="Secure society-scoped document upload and verification" actions={<Button onClick={()=>{setForm({member_id:"",flat_id:"",document_type:"AADHAAR",document_number:"",expiry_date:"",file:null});setOpen(true);setError("");}}><Upload className="h-4 w-4"/> Upload Document</Button>}/>{error&&<p className="mb-4 rounded-md bg-[var(--color-danger)]/10 p-3 text-sm text-[var(--color-danger)]">{error}</p>}{success&&<p className="mb-4 rounded-md bg-[var(--color-success-bg)] p-3 text-sm text-[var(--color-success)]">{success}</p>}<Card><DataTable columns={columns} data={rows} keyField="id" searchFields={["member_name","flat_no","document_type","original_file_name"]} filters={[{key:"status",label:"Status",options:["PENDING","VERIFIED","REJECTED","EXPIRED"]}]} rowActions={[{label:"View / Download",icon:<Download className="h-4 w-4"/>,onClick:r=>void download(r)},{label:"Verify",icon:<Check className="h-4 w-4"/>,onClick:r=>void status(r,"VERIFIED")},{label:"Reject",icon:<X className="h-4 w-4"/>,onClick:r=>void status(r,"REJECTED"),danger:true},{label:"Delete",icon:<Trash2 className="h-4 w-4"/>,onClick:r=>void remove(r),danger:true}]}/></Card>
+<Drawer open={open} onClose={()=>!saving&&setOpen(false)} title="Upload Member Document" footer={<><Button variant="outline" onClick={()=>setOpen(false)}>Cancel</Button><Button type="submit" form="document-form" loading={saving}>Upload</Button></>}><form id="document-form" onSubmit={submit} className="flex flex-col gap-4"><Select label="Member / Flat" required placeholder="Select member" value={form.member_id&&form.flat_id?`${form.member_id}:${form.flat_id}`:""} onChange={e=>{const[memberId,flatId]=e.target.value.split(":");setForm({...form,member_id:memberId,flat_id:flatId});}} options={options.map(o=>({value:`${o.member_id}:${o.flat_id}`,label:`${o.name} — ${o.building_name}/${o.wing_name}/${o.flat_no}`}))}/><Select label="Document Type" required value={form.document_type} onChange={e=>setForm({...form,document_type:e.target.value})} options={types.map(v=>({value:v,label:v.replaceAll("_"," ")}))}/><Input label="Document Number" value={form.document_number} onChange={e=>setForm({...form,document_number:e.target.value})}/><Input label="Expiry Date" type="date" value={form.expiry_date} onChange={e=>setForm({...form,expiry_date:e.target.value})}/><Input label="File" required type="file" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" onChange={e=>setForm({...form,file:e.target.files?.[0]??null})} helpText="PDF, JPG or PNG; maximum 5 MB."/></form></Drawer></div>}
