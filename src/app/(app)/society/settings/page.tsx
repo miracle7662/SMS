@@ -1,56 +1,47 @@
 "use client";
 
+import { FormEvent, useCallback, useEffect, useState } from "react";
+import { Building2, CalendarDays, CreditCard, IndianRupee, RotateCcw, Save } from "lucide-react";
 import { PageHeader } from "@/components/layout/PageHeader";
-import { Card, CardHeader, CardBody } from "@/components/ui/Card";
+import { Card, CardBody, CardHeader } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Input, Select, Switch } from "@/components/ui/Input";
+import { getSocietySession } from "@/lib/session";
 
-export default function SocietySettingsPage() {
-  return (
-    <div>
-      <PageHeader title="Society Settings" description="Configure financial year, billing cycle, and system preferences" actions={<Button>Save Settings</Button>} />
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:5000/api/v1";
+type Settings = {
+  financial_year_start_month:number; billing_frequency:string; bill_generation_day:number; payment_due_days:number; grace_period_days:number;
+  late_fee_type:string; late_fee_value:number; interest_rate_per_annum:number; rounding_mode:string; bill_prefix:string; receipt_prefix:string;
+  tenant_bill_to:string; non_occupancy_enabled:boolean; non_occupancy_percentage:number; require_tenant_police_noc:boolean;
+  gst_registered:boolean; gstin:string|null; bank_name:string|null; bank_account_name:string|null; bank_account_number:string|null;
+  bank_ifsc:string|null; bank_branch:string|null; upi_id:string|null; online_payment_enabled:boolean; currency_code:string; timezone:string;
+  date_format:string; committee_contact_name:string|null; committee_contact_mobile:string|null; committee_contact_email:string|null;
+};
+const defaults:Settings={financial_year_start_month:4,billing_frequency:"MONTHLY",bill_generation_day:1,payment_due_days:10,grace_period_days:0,late_fee_type:"PERCENTAGE",late_fee_value:0,interest_rate_per_annum:0,rounding_mode:"NEAREST_RUPEE",bill_prefix:"BILL/",receipt_prefix:"RCT/",tenant_bill_to:"OWNER",non_occupancy_enabled:false,non_occupancy_percentage:0,require_tenant_police_noc:true,gst_registered:false,gstin:null,bank_name:null,bank_account_name:null,bank_account_number:null,bank_ifsc:null,bank_branch:null,upi_id:null,online_payment_enabled:false,currency_code:"INR",timezone:"Asia/Kolkata",date_format:"DD/MM/YYYY",committee_contact_name:null,committee_contact_mobile:null,committee_contact_email:null};
+const months=["January","February","March","April","May","June","July","August","September","October","November","December"].map((label,index)=>({label,value:String(index+1)}));
 
-      <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
-        <Card>
-          <CardHeader title="Financial Settings" />
-          <CardBody className="flex flex-col gap-4">
-            <Select label="Financial Year Start Month" options={[{ label: "April", value: "4" }, { label: "January", value: "1" }]} defaultValue="4" />
-            <Select label="Maintenance Billing Cycle" options={[{ label: "Monthly", value: "monthly" }, { label: "Quarterly", value: "quarterly" }]} defaultValue="monthly" />
-            <Input label="Bill Due Days" type="number" defaultValue={10} helpText="Days after bill generation for due date" />
-            <Input label="Late Fee (% per month)" type="number" defaultValue={2} />
-            <Input label="GST Registration No. (if applicable)" placeholder="27AABCG1234H1ZQ" />
-          </CardBody>
-        </Card>
-
-        <Card>
-          <CardHeader title="General Preferences" />
-          <CardBody className="flex flex-col gap-4">
-            <Switch checked={true} onChange={() => {}} label="Enable SMS notifications to members" />
-            <Switch checked={true} onChange={() => {}} label="Enable email notifications to members" />
-            <Switch checked={false} onChange={() => {}} label="Allow online payment gateway" />
-            <Switch checked={true} onChange={() => {}} label="Require Police NOC for tenant registration" />
-            <Switch checked={false} onChange={() => {}} label="Enable visitor pre-approval by residents" />
-          </CardBody>
-        </Card>
-
-        <Card>
-          <CardHeader title="Numbering Formats" />
-          <CardBody className="flex flex-col gap-4">
-            <Input label="Maintenance Bill Prefix" defaultValue="GVH/2026-27/" />
-            <Input label="Receipt Number Prefix" defaultValue="RCT/26-27/" />
-            <Input label="Complaint Number Prefix" defaultValue="CMP/26-27/" />
-          </CardBody>
-        </Card>
-
-        <Card>
-          <CardHeader title="Regional Settings" />
-          <CardBody className="flex flex-col gap-4">
-            <Select label="Currency" options={[{ label: "Indian Rupee (₹)", value: "inr" }]} defaultValue="inr" />
-            <Select label="Date Format" options={[{ label: "DD-MMM-YYYY", value: "1" }, { label: "DD/MM/YYYY", value: "2" }]} defaultValue="1" />
-            <Select label="Timezone" options={[{ label: "Asia/Kolkata (IST)", value: "ist" }]} defaultValue="ist" />
-          </CardBody>
-        </Card>
-      </div>
+export default function SocietySettingsPage(){
+  const[settings,setSettings]=useState<Settings>(defaults);const[original,setOriginal]=useState<Settings>(defaults);const[loading,setLoading]=useState(true);const[saving,setSaving]=useState(false);const[error,setError]=useState("");const[success,setSuccess]=useState("");
+  const load=useCallback(async()=>{const session=getSocietySession();if(!session?.accessToken||!session.activeSociety){setError("Please select a society before opening settings.");setLoading(false);return;}try{const r=await fetch(`${API_URL}/society/settings`,{headers:{Authorization:`Bearer ${session.accessToken}`}});const j=await r.json();if(!r.ok||!j.success)throw new Error(j.message||"Unable to load society settings.");const value={...defaults,...j.data};setSettings(value);setOriginal(value);}catch(e){setError(e instanceof Error?e.message:"Unable to load settings.");}finally{setLoading(false);}},[]);useEffect(()=>{void load();},[load]);
+  const text=(key:keyof Settings)=>(e:React.ChangeEvent<HTMLInputElement>)=>setSettings({...settings,[key]:e.target.value||null});
+  const number=(key:keyof Settings)=>(e:React.ChangeEvent<HTMLInputElement>)=>setSettings({...settings,[key]:Number(e.target.value)});
+  const select=(key:keyof Settings)=>(e:React.ChangeEvent<HTMLSelectElement>)=>setSettings({...settings,[key]:e.target.value});
+  async function save(e:FormEvent){e.preventDefault();const session=getSocietySession();if(!session?.accessToken)return;setSaving(true);setError("");setSuccess("");try{const r=await fetch(`${API_URL}/society/settings`,{method:"PUT",headers:{"Content-Type":"application/json",Authorization:`Bearer ${session.accessToken}`},body:JSON.stringify(settings)});const j=await r.json();if(!r.ok||!j.success)throw new Error(Array.isArray(j.errors)?j.errors.join(", "):j.message||"Unable to save settings.");const value={...defaults,...j.data};setSettings(value);setOriginal(value);setSuccess("Society settings saved successfully. Future maintenance bills will use these rules.");}catch(x){setError(x instanceof Error?x.message:"Unable to save settings.");}finally{setSaving(false);}}
+  return <form onSubmit={save}>
+    <PageHeader title="Society Settings" description="Core billing, payment and regional rules for the selected society" actions={<><Button type="button" variant="outline" onClick={()=>{setSettings(original);setError("");setSuccess("");}} disabled={loading||saving}><RotateCcw className="h-4 w-4"/> Reset</Button><Button type="submit" loading={saving} disabled={loading}><Save className="h-4 w-4"/> Save Settings</Button></>}/>
+    {error&&<p className="mb-4 rounded-[var(--radius-md)] bg-[var(--color-danger)]/10 px-4 py-3 text-sm text-[var(--color-danger)]">{error}</p>}{success&&<p className="mb-4 rounded-[var(--radius-md)] bg-[var(--color-success-bg)] px-4 py-3 text-sm text-[var(--color-success)]">{success}</p>}
+    <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
+      <Card><CardHeader title="Financial Year & Billing Cycle" description="Controls when recurring maintenance bills are generated." action={<CalendarDays className="h-5 w-5 text-[var(--color-primary)]"/>}/><CardBody className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <Select label="Financial Year Starts" required value={String(settings.financial_year_start_month)} onChange={e=>setSettings({...settings,financial_year_start_month:Number(e.target.value)})} options={months}/><Select label="Billing Frequency" required value={settings.billing_frequency} onChange={select("billing_frequency")} options={[{label:"Monthly",value:"MONTHLY"},{label:"Quarterly",value:"QUARTERLY"},{label:"Half-Yearly",value:"HALF_YEARLY"},{label:"Yearly",value:"YEARLY"}]}/>
+        <Input label="Bill Generation Day" required type="number" min={1} max={28} value={settings.bill_generation_day} onChange={number("bill_generation_day")} helpText="Use 1–28 to support every month."/><Input label="Payment Due After (Days)" required type="number" min={0} max={90} value={settings.payment_due_days} onChange={number("payment_due_days")}/><Input label="Grace Period (Days)" required type="number" min={0} max={90} value={settings.grace_period_days} onChange={number("grace_period_days")}/><Select label="Bill Rounding" required value={settings.rounding_mode} onChange={select("rounding_mode")} options={[{label:"No Rounding",value:"NONE"},{label:"Nearest Rupee",value:"NEAREST_RUPEE"},{label:"Round Up to Rupee",value:"UP_TO_RUPEE"}]}/>
+      </CardBody></Card>
+      <Card><CardHeader title="Late Fee & Occupancy Rules" description="Used when dues remain unpaid or a flat is rented." action={<IndianRupee className="h-5 w-5 text-[var(--color-primary)]"/>}/><CardBody className="flex flex-col gap-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2"><Select label="Late Fee Type" required value={settings.late_fee_type} onChange={select("late_fee_type")} options={[{label:"No Late Fee",value:"NONE"},{label:"Fixed Amount",value:"FIXED"},{label:"Percentage",value:"PERCENTAGE"}]}/><Input label={settings.late_fee_type==="FIXED"?"Late Fee Amount":"Late Fee Percentage"} required type="number" min={0} step="0.01" disabled={settings.late_fee_type==="NONE"} value={settings.late_fee_value} onChange={number("late_fee_value")}/><Input label="Annual Interest (%)" required type="number" min={0} max={100} step="0.001" value={settings.interest_rate_per_annum} onChange={number("interest_rate_per_annum")}/><Select label="Tenant Bill Recipient" required value={settings.tenant_bill_to} onChange={select("tenant_bill_to")} options={[{label:"Flat Owner",value:"OWNER"},{label:"Tenant",value:"TENANT"}]}/></div>
+        <Switch checked={settings.non_occupancy_enabled} onChange={v=>setSettings({...settings,non_occupancy_enabled:v})} label="Enable non-occupancy charges for rented flats"/>{settings.non_occupancy_enabled&&<Input label="Non-Occupancy Charge (%)" type="number" min={0} max={100} step="0.001" value={settings.non_occupancy_percentage} onChange={number("non_occupancy_percentage")}/>}<Switch checked={settings.require_tenant_police_noc} onChange={v=>setSettings({...settings,require_tenant_police_noc:v})} label="Require Police NOC for tenant registration"/>
+      </CardBody></Card>
+      <Card><CardHeader title="Numbering & Tax" description="Prefixes will be combined with the financial year and sequence." action={<Building2 className="h-5 w-5 text-[var(--color-primary)]"/>}/><CardBody className="flex flex-col gap-4"><div className="grid grid-cols-1 gap-4 sm:grid-cols-2"><Input label="Maintenance Bill Prefix" required maxLength={50} value={settings.bill_prefix} onChange={text("bill_prefix")}/><Input label="Receipt Prefix" required maxLength={50} value={settings.receipt_prefix} onChange={text("receipt_prefix")}/></div><Switch checked={settings.gst_registered} onChange={v=>setSettings({...settings,gst_registered:v,gstin:v?settings.gstin:null})} label="Society is registered under GST"/>{settings.gst_registered&&<Input label="GSTIN" required maxLength={20} value={settings.gstin??""} onChange={text("gstin")} placeholder="27ABCDE1234F1Z5"/>}<div className="grid grid-cols-1 gap-4 sm:grid-cols-3"><Select label="Currency" value={settings.currency_code} onChange={select("currency_code")} options={[{label:"Indian Rupee (INR)",value:"INR"}]}/><Select label="Timezone" value={settings.timezone} onChange={select("timezone")} options={[{label:"Asia/Kolkata (IST)",value:"Asia/Kolkata"}]}/><Select label="Date Format" value={settings.date_format} onChange={select("date_format")} options={["DD/MM/YYYY","DD-MMM-YYYY","YYYY-MM-DD"].map(value=>({label:value,value}))}/></div></CardBody></Card>
+      <Card><CardHeader title="Bank & Payment Details" description="Shown on maintenance bills and payment instructions." action={<CreditCard className="h-5 w-5 text-[var(--color-primary)]"/>}/><CardBody className="flex flex-col gap-4"><div className="grid grid-cols-1 gap-4 sm:grid-cols-2"><Input label="Bank Name" value={settings.bank_name??""} onChange={text("bank_name")}/><Input label="Account Holder Name" value={settings.bank_account_name??""} onChange={text("bank_account_name")}/><Input label="Account Number" value={settings.bank_account_number??""} onChange={text("bank_account_number")}/><Input label="IFSC Code" value={settings.bank_ifsc??""} onChange={text("bank_ifsc")}/><Input label="Branch" value={settings.bank_branch??""} onChange={text("bank_branch")}/><Input label="UPI ID" value={settings.upi_id??""} onChange={text("upi_id")}/></div><Switch checked={settings.online_payment_enabled} onChange={v=>setSettings({...settings,online_payment_enabled:v})} label="Enable online payment option"/></CardBody></Card>
+      <Card className="xl:col-span-2"><CardHeader title="Committee Billing Contact" description="Contact displayed when members need help with a bill."/><CardBody className="grid grid-cols-1 gap-4 md:grid-cols-3"><Input label="Contact Person" value={settings.committee_contact_name??""} onChange={text("committee_contact_name")}/><Input label="Mobile Number" inputMode="tel" value={settings.committee_contact_mobile??""} onChange={text("committee_contact_mobile")}/><Input label="Email Address" type="email" value={settings.committee_contact_email??""} onChange={text("committee_contact_email")}/></CardBody></Card>
     </div>
-  );
+  </form>;
 }

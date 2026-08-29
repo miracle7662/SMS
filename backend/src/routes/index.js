@@ -9,6 +9,7 @@ import flatRoutes from './flat.routes.js';
 import societyUserRoutes from './society-user.routes.js';
 import memberRoutes from './member.routes.js';
 import familyDocumentRoutes from './family-document.routes.js';
+import societySettingRoutes from './society-setting.routes.js';
 
 const router = express.Router();
 
@@ -24,6 +25,7 @@ router.use('/society/flats', flatRoutes);
 router.use('/society/users', societyUserRoutes);
 router.use('/society/members', memberRoutes);
 router.use('/society/member-management', familyDocumentRoutes);
+router.use('/society/settings', societySettingRoutes);
 router.use('/society', societyProfileRoutes);
 
 export default router;
