@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Building2, CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Card, CardHeader, CardBody } from "@/components/ui/Card";
+import { saveActiveSociety } from "@/lib/session";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:5000/api/v1";
 
@@ -194,8 +195,8 @@ export default function SelectSocietyPage() {
       }
 
       const nextAccessToken = result.data?.access_token ?? result.data?.accessToken ?? token;
-      storage.setItem("society_access_token", nextAccessToken);
-      storage.setItem("society_active", JSON.stringify(selectedSociety ?? { id: selectedSocietyId }));
+      const activeSociety = result.data?.active_society ?? result.data?.activeSociety ?? selectedSociety ?? { id: selectedSocietyId };
+      saveActiveSociety(storage, activeSociety, nextAccessToken, result.data?.roles ?? []);
 
       router.push("/dashboard");
     } catch (submitError) {

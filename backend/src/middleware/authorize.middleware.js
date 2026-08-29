@@ -9,11 +9,13 @@ export const requireActiveSociety = asyncHandler(async (req, res, next) => {
     throw new ApiError(400, 'Active society context is required for this operation');
   }
 
-  // Verify user still has access to this society
-  const hasAccess = await societyAccessRepository.hasAccessToSociety(
-    req.auth.userId,
-    req.auth.activeSocietyId
-  );
+  const isSuperAdmin = req.auth.platformRoles?.includes('SUPER_ADMIN');
+  const hasAccess = isSuperAdmin
+    ? Boolean(await societyAccessRepository.getSocietyById(req.auth.activeSocietyId))
+    : await societyAccessRepository.hasAccessToSociety(
+        req.auth.userId,
+        req.auth.activeSocietyId
+      );
 
   if (!hasAccess) {
     throw new ApiError(403, 'You do not have access to this society');
@@ -24,6 +26,10 @@ export const requireActiveSociety = asyncHandler(async (req, res, next) => {
 
 export const authorizeRoles = (...allowedRoles) => {
   return (req, res, next) => {
+    if (req.auth?.platformRoles?.includes('SUPER_ADMIN') && req.auth.activeSocietyId) {
+      return next();
+    }
+
     const userRoles = req.auth.roles || [];
 
     const hasRole = allowedRoles.some(role => userRoles.includes(role));
@@ -50,6 +56,10 @@ export const authorizePlatformRoles = (...allowedRoles) => {
 
 export const authorizePermissions = (...permissionCodes) => {
   return asyncHandler(async (req, res, next) => {
+    if (req.auth?.platformRoles?.includes('SUPER_ADMIN') && req.auth.activeSocietyId) {
+      return next();
+    }
+
     const userId = req.auth.userId;
     const userRoles = req.auth.roles || [];
 

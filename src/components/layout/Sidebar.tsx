@@ -9,34 +9,25 @@ import { ICON_MAP } from "./icon-map";
 import { cn } from "@/lib/utils";
 import { society } from "@/lib/mock-data";
 import { initials } from "@/lib/utils";
+import { SocietySession } from "@/lib/session";
 
 export function Sidebar({
   collapsed,
   onToggleCollapse,
   mobileOpen,
   onCloseMobile,
+  session,
 }: {
   collapsed: boolean;
   onToggleCollapse: () => void;
   mobileOpen: boolean;
   onCloseMobile: () => void;
+  session: SocietySession | null;
 }) {
   const pathname = usePathname();
   const [openGroups, setOpenGroups] = useState<Set<string>>(new Set());
-  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
-
-  useEffect(() => {
-    const storages = [window.localStorage, window.sessionStorage];
-    const hasSuperAdminRole = storages.some((storage) => {
-      try {
-        const roles = JSON.parse(storage.getItem("society_platform_roles") || "[]");
-        return Array.isArray(roles) && roles.includes("SUPER_ADMIN");
-      } catch {
-        return false;
-      }
-    });
-    setIsSuperAdmin(hasSuperAdminRole);
-  }, []);
+  const isSuperAdmin = session?.isSuperAdmin ?? false;
+  const activeSocietyName = session?.activeSociety?.name ?? session?.activeSociety?.society_name;
 
   useEffect(() => {
     // auto expand the group matching current path
@@ -79,7 +70,7 @@ export function Sidebar({
           {!collapsed && (
             <div className="min-w-0">
               <p className="truncate text-sm font-semibold text-[var(--color-text)]">SocietyOS</p>
-              <p className="truncate text-[11px] text-[var(--color-text-secondary)]">{society.name}</p>
+              <p className="truncate text-[11px] text-[var(--color-text-secondary)]">{activeSocietyName || (isSuperAdmin ? "Super Admin" : society.name)}</p>
             </div>
           )}
           <button
@@ -114,7 +105,7 @@ export function Sidebar({
                 </Link>
               </li>
             )}
-            {NAV.map((item) => {
+            {(!isSuperAdmin || session?.activeSociety) && NAV.map((item) => {
               const Icon = ICON_MAP[item.icon];
               const active = isActiveParent(item.href);
               const isOpen = openGroups.has(item.label);
@@ -222,12 +213,12 @@ export function Sidebar({
             )}
           >
             <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[var(--color-primary)] text-xs font-semibold text-white">
-              {initials("Anil Deshmukh")}
+              {initials(session?.user?.name || "User")}
             </div>
             {!collapsed && (
               <div className="min-w-0">
-                <p className="truncate text-[13px] font-medium text-[var(--color-text)]">Anil Deshmukh</p>
-                <p className="truncate text-[11px] text-[var(--color-text-secondary)]">Society Admin</p>
+                <p className="truncate text-[13px] font-medium text-[var(--color-text)]">{session?.user?.name || "User"}</p>
+                <p className="truncate text-[11px] text-[var(--color-text-secondary)]">{isSuperAdmin ? "Super Admin" : "Society User"}</p>
               </div>
             )}
           </Link>

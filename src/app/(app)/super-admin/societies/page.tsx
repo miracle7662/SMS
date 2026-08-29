@@ -9,6 +9,7 @@ import { Card, CardBody } from "@/components/ui/Card";
 import { Input, Textarea } from "@/components/ui/Input";
 import { Modal } from "@/components/ui/Modal";
 import { StatusBadge } from "@/components/ui/Badge";
+import { getSocietySession, saveActiveSociety } from "@/lib/session";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:5000/api/v1";
 
@@ -52,21 +53,6 @@ const EMPTY_FORM: SocietyForm = {
   established_date: "",
 };
 
-function getSession() {
-  const storages = [window.localStorage, window.sessionStorage];
-  for (const storage of storages) {
-    const token = storage.getItem("society_access_token");
-    if (!token) continue;
-    try {
-      const roles = JSON.parse(storage.getItem("society_platform_roles") || "[]");
-      return { token, isSuperAdmin: Array.isArray(roles) && roles.includes("SUPER_ADMIN") };
-    } catch {
-      return { token, isSuperAdmin: false };
-    }
-  }
-  return null;
-}
-
 export default function SuperAdminSocietiesPage() {
   const router = useRouter();
   const [societies, setSocieties] = useState<Society[]>([]);
@@ -74,12 +60,13 @@ export default function SuperAdminSocietiesPage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [selectingId, setSelectingId] = useState<number | null>(null);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
   const loadSocieties = useCallback(async () => {
-    const session = getSession();
-    if (!session?.token) {
+    const session = getSocietySession();
+    if (!session?.accessToken) {
       router.replace("/login");
       return;
     }
@@ -91,7 +78,7 @@ export default function SuperAdminSocietiesPage() {
     try {
       setError("");
       const response = await fetch(`${API_URL}/platform/societies`, {
-        headers: { Authorization: `Bearer ${session.token}` },
+        headers: { Authorization: `Bearer ${session.accessToken}` },
       });
       const result = await response.json();
       if (!response.ok || !result.success) throw new Error(result.message || "Unable to load societies.");
@@ -113,8 +100,8 @@ export default function SuperAdminSocietiesPage() {
 
   async function handleCreate(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const session = getSession();
-    if (!session?.token) return router.replace("/login");
+    const session = getSocietySession();
+    if (!session?.accessToken) return router.replace("/login");
 
     setSaving(true);
     setError("");
@@ -124,7 +111,7 @@ export default function SuperAdminSocietiesPage() {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${session.token}`,
+          Authorization: `Bearer ${session.accessToken}`,
         },
         body: JSON.stringify(form),
       });
@@ -142,6 +129,41 @@ export default function SuperAdminSocietiesPage() {
       setError(saveError instanceof Error ? saveError.message : "Unable to create society.");
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleSelectSociety(society: Society) {
+    const session = getSocietySession();
+    if (!session?.accessToken) return router.replace("/login");
+
+    setSelectingId(society.id);
+    setError("");
+    try {
+      const response = await fetch(`${API_URL}/auth/select-society`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.accessToken}`,
+        },
+        body: JSON.stringify({ society_id: society.id }),
+      });
+      const result = await response.json();
+      if (!response.ok || !result.success) throw new Error(result.message || "Unable to select society.");
+
+      const scopedToken = result.data?.access_token ?? result.data?.accessToken;
+      const activeSociety = result.data?.active_society ?? result.data?.activeSociety ?? {
+        id: society.id,
+        code: society.society_code,
+        name: society.society_name,
+      };
+      if (!scopedToken) throw new Error("Society selection did not return an access token.");
+
+      saveActiveSociety(session.storage, activeSociety, scopedToken, result.data?.roles ?? []);
+      router.push("/dashboard");
+    } catch (selectError) {
+      setError(selectError instanceof Error ? selectError.message : "Unable to select society.");
+    } finally {
+      setSelectingId(null);
     }
   }
 
@@ -182,7 +204,7 @@ export default function SuperAdminSocietiesPage() {
                   <span className="flex items-center gap-2"><MapPin className="h-4 w-4" /> {[society.city, society.state].filter(Boolean).join(", ") || "Location not added"}</span>
                   <span className="flex items-center gap-2"><Users className="h-4 w-4" /> {society.memberCount ?? 0} assigned users</span>
                 </div>
-                <Button variant="outline" className="mt-5 w-full" onClick={() => router.push(`/select-society?society=${society.id}`)}>Select Society</Button>
+                <Button variant="outline" className="mt-5 w-full" loading={selectingId === society.id} onClick={() => void handleSelectSociety(society)}>Select Society</Button>
               </CardBody>
             </Card>
           ))}

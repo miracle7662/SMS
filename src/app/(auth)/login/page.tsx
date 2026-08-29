@@ -56,6 +56,13 @@ export default function LoginPage() {
         : requiresSocietySelection === true
           ? "/select-society"
           : "/dashboard";
+
+      if (!isSuperAdmin && requiresSocietySelection !== true && result.data.societies?.length === 1) {
+        storage.setItem("society_active", JSON.stringify(result.data.societies[0]));
+      } else {
+        storage.removeItem("society_active");
+        storage.removeItem("society_active_roles");
+      }
       router.push(redirectPath);
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : "Unable to sign in. Please try again.");
