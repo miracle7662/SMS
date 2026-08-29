@@ -50,5 +50,11 @@ class ChargeTypeRepository {
        WHERE id = ? AND society_id = ? AND deleted_at IS NULL`, [userId, id, societyId]
     ); return result.affectedRows > 0;
   }
+  async hasRules(societyId, id) {
+    const [rows] = await getPool().execute(
+      `SELECT COUNT(*) AS total FROM maintenance_charge_rules
+       WHERE society_id = ? AND charge_type_id = ? AND deleted_at IS NULL`, [societyId, id]
+    ); return Number(rows[0]?.total || 0) > 0;
+  }
 }
 export default new ChargeTypeRepository();

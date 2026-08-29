@@ -1,0 +1,12 @@
+import express from 'express';
+import { createChargeRule, deleteChargeRule, listChargeRules, updateChargeRule } from '../controllers/charge-rule.controller.js';
+import { authenticate } from '../middleware/authenticate.middleware.js';
+import { authorizePermissions, requireActiveSociety } from '../middleware/authorize.middleware.js';
+import { handleValidationErrors } from '../validators/auth.validators.js';
+import { validateChargeRule, validateChargeRuleId } from '../validators/charge-rule.validators.js';
+const router = express.Router(); router.use(authenticate, requireActiveSociety);
+router.get('/', authorizePermissions('society.charge_rules.view'), listChargeRules);
+router.post('/', authorizePermissions('society.charge_rules.create'), validateChargeRule, handleValidationErrors, createChargeRule);
+router.put('/:id', authorizePermissions('society.charge_rules.update'), validateChargeRuleId, validateChargeRule, handleValidationErrors, updateChargeRule);
+router.delete('/:id', authorizePermissions('society.charge_rules.delete'), validateChargeRuleId, handleValidationErrors, deleteChargeRule);
+export default router;

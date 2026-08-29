@@ -1,85 +1,23 @@
 "use client";
 
-import { useState } from "react";
-import { Plus, Pencil, Trash2 } from "lucide-react";
-import { PageHeader } from "@/components/layout/PageHeader";
-import { Card } from "@/components/ui/Card";
-import { Button } from "@/components/ui/Button";
-import { DataTable, Column } from "@/components/ui/DataTable";
-import { StatusBadge, Badge } from "@/components/ui/Badge";
-import { Drawer } from "@/components/ui/Drawer";
-import { Input, Select, Switch } from "@/components/ui/Input";
-
-interface ChargeRule {
-  id: string;
-  chargeType: string;
-  basis: "Fixed" | "Per Sq. Ft." | "Flat Type Based";
-  amount: string;
-  effectiveFrom: string;
-  effectiveTo: string;
-  status: "Active" | "Inactive";
-}
-
-const rules: ChargeRule[] = [
-  { id: "R1", chargeType: "Monthly Maintenance", basis: "Per Sq. Ft.", amount: "₹4.50", effectiveFrom: "01-Apr-2026", effectiveTo: "31-Mar-2027", status: "Active" },
-  { id: "R2", chargeType: "Sinking Fund", basis: "Fixed", amount: "₹450", effectiveFrom: "01-Apr-2026", effectiveTo: "31-Mar-2027", status: "Active" },
-  { id: "R3", chargeType: "Non-Occupancy Charge", basis: "Flat Type Based", amount: "10% of Maint.", effectiveFrom: "01-Apr-2026", effectiveTo: "31-Mar-2027", status: "Active" },
-  { id: "R4", chargeType: "Water Charge (1BHK)", basis: "Flat Type Based", amount: "₹350", effectiveFrom: "01-Apr-2026", effectiveTo: "31-Mar-2027", status: "Active" },
-  { id: "R5", chargeType: "Water Charge (3BHK)", basis: "Flat Type Based", amount: "₹700", effectiveFrom: "01-Apr-2026", effectiveTo: "31-Mar-2027", status: "Active" },
-  { id: "R6", chargeType: "Old Maintenance Rate", basis: "Per Sq. Ft.", amount: "₹4.00", effectiveFrom: "01-Apr-2025", effectiveTo: "31-Mar-2026", status: "Inactive" },
-];
-
-export default function ChargeRulesPage() {
-  const [drawerOpen, setDrawerOpen] = useState(false);
-
-  const columns: Column<ChargeRule>[] = [
-    { key: "chargeType", header: "Charge Type" },
-    { key: "basis", header: "Basis", render: (r) => <Badge>{r.basis}</Badge> },
-    { key: "amount", header: "Amount" },
-    { key: "effectiveFrom", header: "Effective From" },
-    { key: "effectiveTo", header: "Effective To" },
-    { key: "status", header: "Status", render: (r) => <StatusBadge status={r.status} /> },
-  ];
-
-  return (
-    <div>
-      <PageHeader
-        title="Charge Rules"
-        description="Configure calculation rules for each charge type"
-        actions={<Button onClick={() => setDrawerOpen(true)}><Plus className="h-4 w-4" /> Add Charge Rule</Button>}
-      />
-      <Card>
-        <DataTable
-          columns={columns}
-          data={rules}
-          keyField="id"
-          searchPlaceholder="Search rules..."
-          filters={[{ key: "basis", label: "Basis", options: ["Fixed", "Per Sq. Ft.", "Flat Type Based"] }, { key: "status", label: "Status", options: ["Active", "Inactive"] }]}
-          rowActions={[
-            { label: "Edit", icon: <Pencil className="h-4 w-4" />, onClick: () => setDrawerOpen(true) },
-            { label: "Delete", icon: <Trash2 className="h-4 w-4" />, onClick: () => {}, danger: true },
-          ]}
-        />
-      </Card>
-
-      <Drawer
-        open={drawerOpen}
-        onClose={() => setDrawerOpen(false)}
-        title="Add Charge Rule"
-        width="520px"
-        footer={<><Button variant="outline" onClick={() => setDrawerOpen(false)}>Cancel</Button><Button onClick={() => setDrawerOpen(false)}>Save Rule</Button></>}
-      >
-        <div className="flex flex-col gap-4">
-          <Select label="Charge Type" required options={["Monthly Maintenance", "Sinking Fund", "Non-Occupancy Charge", "Water Charge"].map((v) => ({ label: v, value: v }))} />
-          <Select label="Calculation Basis" required options={["Fixed Amount", "Per Square Feet", "Flat Type Based"].map((v) => ({ label: v, value: v }))} />
-          <Input label="Amount / Rate" required placeholder="e.g. 4.50" />
-          <div className="grid grid-cols-2 gap-4">
-            <Input label="Effective From" type="date" required />
-            <Input label="Effective To" type="date" />
-          </div>
-          <Switch checked={true} onChange={() => {}} label="Rule is Active" />
-        </div>
-      </Drawer>
-    </div>
-  );
+import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { Pencil, Plus, Trash2 } from "lucide-react";
+import { PageHeader } from "@/components/layout/PageHeader"; import { Card } from "@/components/ui/Card"; import { Button } from "@/components/ui/Button"; import { Badge, StatusBadge } from "@/components/ui/Badge"; import { Column, DataTable } from "@/components/ui/DataTable"; import { Drawer } from "@/components/ui/Drawer"; import { Input, Select, Switch, Textarea } from "@/components/ui/Input"; import { formatDate } from "@/lib/utils"; import { getSocietySession } from "@/lib/session";
+const API_URL=process.env.NEXT_PUBLIC_API_URL??"http://localhost:5000/api/v1";
+type ChargeType={id:number;charge_name:string;charge_code:string;calculation_basis:string;status:string};type Flat={id:number;flat_no:string;flat_type:string;building_name:string;wing_name:string};
+type Rule={id:number;charge_type_id:number;charge_name:string;charge_code:string;calculation_basis:string;rule_name:string;applicability_scope:string;flat_type:string|null;occupancy_status:string|null;flat_id:number|null;flat_no:string|null;building_name:string|null;wing_name:string|null;rate:number;minimum_amount:number|null;maximum_amount:number|null;effective_from:string;effective_to:string|null;priority:number;proration_enabled:boolean;description:string|null;status:"ACTIVE"|"INACTIVE"};
+type FormState={charge_type_id:string;rule_name:string;applicability_scope:string;flat_type:string;occupancy_status:string;flat_id:string;rate:number;minimum_amount:number|null;maximum_amount:number|null;effective_from:string;effective_to:string;proration_enabled:boolean;description:string;status:"ACTIVE"|"INACTIVE"};
+const blank:FormState={charge_type_id:"",rule_name:"",applicability_scope:"ALL_FLATS",flat_type:"",occupancy_status:"OWNER_OCCUPIED",flat_id:"",rate:0,minimum_amount:null,maximum_amount:null,effective_from:"",effective_to:"",proration_enabled:false,description:"",status:"ACTIVE"};
+const scopeLabels:Record<string,string>={ALL_FLATS:"All Flats",FLAT_TYPE:"Specific Flat Type",OCCUPANCY_STATUS:"Occupancy Status",SPECIFIC_FLAT:"Specific Flat"};const basisLabels:Record<string,string>={FIXED:"Fixed Amount",PER_CARPET_SQFT:"Per Carpet Sq. Ft.",PER_BUILTUP_SQFT:"Per Built-up Sq. Ft.",PERCENTAGE_OF_MAINTENANCE:"% of Maintenance",FLAT_TYPE:"Flat Type Based",MANUAL:"Manual Amount"};
+export default function ChargeRulesPage(){
+ const[rules,setRules]=useState<Rule[]>([]);const[chargeTypes,setChargeTypes]=useState<ChargeType[]>([]);const[flats,setFlats]=useState<Flat[]>([]);const[open,setOpen]=useState(false);const[editingId,setEditingId]=useState<number|null>(null);const[form,setForm]=useState<FormState>(blank);const[loading,setLoading]=useState(true);const[saving,setSaving]=useState(false);const[error,setError]=useState("");const[success,setSuccess]=useState("");
+ const load=useCallback(async()=>{const s=getSocietySession();if(!s?.accessToken||!s.activeSociety){setError("Please select a society first.");setLoading(false);return;}try{const h={Authorization:`Bearer ${s.accessToken}`};const[a,b,c]=await Promise.all([fetch(`${API_URL}/society/maintenance/charge-rules`,{headers:h}),fetch(`${API_URL}/society/maintenance/charge-types`,{headers:h}),fetch(`${API_URL}/society/flats`,{headers:h})]);const[x,y,z]=await Promise.all([a.json(),b.json(),c.json()]);if(!a.ok||!x.success)throw new Error(x.message);if(!b.ok||!y.success)throw new Error(y.message);if(!c.ok||!z.success)throw new Error(z.message);setRules(x.data??[]);setChargeTypes((y.data??[]).filter((item:ChargeType)=>item.status==="ACTIVE"));setFlats((z.data??[]).filter((item:{status:string})=>item.status==="ACTIVE"));}catch(e){setError(e instanceof Error?e.message:"Unable to load charge rules.");}finally{setLoading(false);}},[]);useEffect(()=>{void load();},[load]);
+ const flatTypes=useMemo(()=>Array.from(new Set(flats.map(f=>f.flat_type))).sort(),[flats]);const selectedType=chargeTypes.find(c=>String(c.id)===form.charge_type_id);
+ function create(){setEditingId(null);setForm({...blank,effective_from:new Date().toISOString().slice(0,10)});setError("");setSuccess("");setOpen(true);}function edit(r:Rule){setEditingId(r.id);setForm({charge_type_id:String(r.charge_type_id),rule_name:r.rule_name,applicability_scope:r.applicability_scope,flat_type:r.flat_type??"",occupancy_status:r.occupancy_status??"OWNER_OCCUPIED",flat_id:r.flat_id?String(r.flat_id):"",rate:r.rate,minimum_amount:r.minimum_amount,maximum_amount:r.maximum_amount,effective_from:String(r.effective_from).slice(0,10),effective_to:r.effective_to?String(r.effective_to).slice(0,10):"",proration_enabled:r.proration_enabled,description:r.description??"",status:r.status});setError("");setSuccess("");setOpen(true);}
+ async function submit(e:FormEvent){e.preventDefault();const s=getSocietySession();if(!s?.accessToken)return;setSaving(true);setError("");try{const payload={...form,charge_type_id:Number(form.charge_type_id),flat_id:form.flat_id?Number(form.flat_id):null};const r=await fetch(`${API_URL}/society/maintenance/charge-rules${editingId?`/${editingId}`:""}`,{method:editingId?"PUT":"POST",headers:{"Content-Type":"application/json",Authorization:`Bearer ${s.accessToken}`},body:JSON.stringify(payload)});const j=await r.json();if(!r.ok||!j.success)throw new Error(Array.isArray(j.errors)?j.errors.join(", "):j.message||"Unable to save rule.");setOpen(false);setSuccess(editingId?"Charge rule updated successfully.":"Charge rule created successfully.");await load();}catch(x){setError(x instanceof Error?x.message:"Unable to save rule.");}finally{setSaving(false);}}
+ async function remove(r:Rule){if(!confirm(`Delete rule "${r.rule_name}"?`))return;const s=getSocietySession();if(!s?.accessToken)return;try{const response=await fetch(`${API_URL}/society/maintenance/charge-rules/${r.id}`,{method:"DELETE",headers:{Authorization:`Bearer ${s.accessToken}`}});const j=await response.json();if(!response.ok||!j.success)throw new Error(j.message);setSuccess("Charge rule deleted successfully.");await load();}catch(x){setError(x instanceof Error?x.message:"Unable to delete rule.");}}
+ const target=(r:Rule)=>r.applicability_scope==="FLAT_TYPE"?r.flat_type:r.applicability_scope==="OCCUPANCY_STATUS"?r.occupancy_status?.replaceAll("_"," "):r.applicability_scope==="SPECIFIC_FLAT"?`${r.building_name}/${r.wing_name}/${r.flat_no}`:"All active flats";const rate=(r:Rule)=>r.calculation_basis==="PERCENTAGE_OF_MAINTENANCE"?`${r.rate}%`:r.calculation_basis.includes("SQFT")?`₹${r.rate}/sqft`:`₹${r.rate}`;
+ const columns:Column<Rule>[]=[{key:"rule_name",header:"Rule",render:r=><span><span className="block font-medium">{r.rule_name}</span><span className="block text-xs text-[var(--color-text-secondary)]">{r.charge_name}</span></span>},{key:"applicability_scope",header:"Scope",render:r=><span><Badge>{scopeLabels[r.applicability_scope]}</Badge><span className="mt-1 block text-xs">{target(r)}</span></span>},{key:"calculation_basis",header:"Basis",render:r=>basisLabels[r.calculation_basis]},{key:"rate",header:"Rate",render:rate},{key:"effective_from",header:"Effective From",render:r=>formatDate(r.effective_from)},{key:"effective_to",header:"Effective To",render:r=>r.effective_to?formatDate(r.effective_to):"No end date"},{key:"status",header:"Status",render:r=><StatusBadge status={r.status==="ACTIVE"?"Active":"Inactive"}/>}];
+ return <div><PageHeader title="Charge Rules" description="Set effective rates with flat-specific precedence and date history" actions={<Button onClick={create} disabled={!chargeTypes.length}><Plus className="h-4 w-4"/> Add Charge Rule</Button>}/>{!loading&&!chargeTypes.length&&<p className="mb-4 rounded-[var(--radius-md)] bg-[var(--color-warning-bg)] px-4 py-3 text-sm text-[var(--color-warning)]">Create at least one active Charge Type before adding rules.</p>}{error&&<p className="mb-4 rounded-[var(--radius-md)] bg-[var(--color-danger)]/10 px-4 py-3 text-sm text-[var(--color-danger)]">{error}</p>}{success&&<p className="mb-4 rounded-[var(--radius-md)] bg-[var(--color-success-bg)] px-4 py-3 text-sm text-[var(--color-success)]">{success}</p>}<Card><DataTable columns={columns} data={rules} keyField="id" searchFields={["rule_name","charge_name","flat_type","flat_no"]} searchPlaceholder={loading?"Loading rules...":"Search charge rules..."} filters={[{key:"applicability_scope",label:"Scope",options:["ALL_FLATS","FLAT_TYPE","OCCUPANCY_STATUS","SPECIFIC_FLAT"]},{key:"status",label:"Status",options:["ACTIVE","INACTIVE"]}]} rowActions={[{label:"Edit",icon:<Pencil className="h-4 w-4"/>,onClick:edit},{label:"Delete",icon:<Trash2 className="h-4 w-4"/>,onClick:r=>void remove(r),danger:true}]}/></Card>
+ <Drawer open={open} onClose={()=>!saving&&setOpen(false)} title={editingId?"Edit Charge Rule":"Add Charge Rule"} description="More specific scopes override general rules during bill generation." width="580px" footer={<><Button variant="outline" onClick={()=>setOpen(false)} disabled={saving}>Cancel</Button><Button type="submit" form="charge-rule-form" loading={saving}>{editingId?"Update Rule":"Create Rule"}</Button></>}><form id="charge-rule-form" onSubmit={submit} className="flex flex-col gap-4"><Select label="Charge Type" required placeholder="Select charge type" value={form.charge_type_id} onChange={e=>setForm({...form,charge_type_id:e.target.value})} options={chargeTypes.map(c=>({value:String(c.id),label:`${c.charge_name} — ${basisLabels[c.calculation_basis]}`}))}/><Input label="Rule Name" required maxLength={150} value={form.rule_name} onChange={e=>setForm({...form,rule_name:e.target.value})} placeholder="e.g. 2BHK Maintenance 2026-27"/><Select label="Applicable To" required value={form.applicability_scope} onChange={e=>setForm({...form,applicability_scope:e.target.value,flat_type:"",flat_id:""})} options={Object.entries(scopeLabels).map(([value,label])=>({value,label}))}/>{form.applicability_scope==="FLAT_TYPE"&&<Select label="Flat Type" required placeholder="Select flat type" value={form.flat_type} onChange={e=>setForm({...form,flat_type:e.target.value})} options={flatTypes.map(value=>({value,label:value}))}/>} {form.applicability_scope==="OCCUPANCY_STATUS"&&<Select label="Occupancy Status" required value={form.occupancy_status} onChange={e=>setForm({...form,occupancy_status:e.target.value})} options={[{value:"OWNER_OCCUPIED",label:"Owner Occupied"},{value:"RENTED",label:"Rented"},{value:"VACANT",label:"Vacant"}]}/>} {form.applicability_scope==="SPECIFIC_FLAT"&&<Select label="Flat" required placeholder="Select flat" value={form.flat_id} onChange={e=>setForm({...form,flat_id:e.target.value})} options={flats.map(f=>({value:String(f.id),label:`${f.building_name}/${f.wing_name}/${f.flat_no} (${f.flat_type})`}))}/>}<div className="rounded-[var(--radius-md)] bg-[var(--color-bg)] px-3 py-2 text-xs text-[var(--color-text-secondary)]">Calculation: {selectedType?basisLabels[selectedType.calculation_basis]:"Select a charge type"}</div><div className="grid grid-cols-1 gap-4 sm:grid-cols-3"><Input label={selectedType?.calculation_basis==="PERCENTAGE_OF_MAINTENANCE"?"Rate (%)":"Rate"} required type="number" min={0} step="0.0001" value={form.rate} onChange={e=>setForm({...form,rate:Number(e.target.value)})}/><Input label="Minimum Amount" type="number" min={0} step="0.01" value={form.minimum_amount??""} onChange={e=>setForm({...form,minimum_amount:e.target.value===""?null:Number(e.target.value)})}/><Input label="Maximum Amount" type="number" min={0} step="0.01" value={form.maximum_amount??""} onChange={e=>setForm({...form,maximum_amount:e.target.value===""?null:Number(e.target.value)})}/></div><div className="grid grid-cols-1 gap-4 sm:grid-cols-2"><Input label="Effective From" required type="date" value={form.effective_from} onChange={e=>setForm({...form,effective_from:e.target.value})}/><Input label="Effective To" type="date" value={form.effective_to} onChange={e=>setForm({...form,effective_to:e.target.value})} helpText="Leave empty for no end date."/></div><div className="grid grid-cols-1 gap-4 sm:grid-cols-2"><Select label="Status" value={form.status} onChange={e=>setForm({...form,status:e.target.value as "ACTIVE"|"INACTIVE"})} options={[{value:"ACTIVE",label:"Active"},{value:"INACTIVE",label:"Inactive"}]}/><Switch checked={form.proration_enabled} onChange={proration_enabled=>setForm({...form,proration_enabled})} label="Prorate for partial billing period"/></div><Textarea label="Description" maxLength={500} value={form.description} onChange={e=>setForm({...form,description:e.target.value})}/></form></Drawer></div>;
 }

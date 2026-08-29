@@ -29,7 +29,9 @@ class ChargeTypeService {
     await auditRepository.log({ societyId, userId, moduleName: 'charge_types', action: 'update', recordId: id, oldData: current, newData: updated, ipAddress: meta.ipAddress, userAgent: meta.userAgent }); return updated;
   }
   async remove(societyId, id, userId, meta) {
-    const current = await this.get(societyId, id); await repository.remove(societyId, id, userId);
+    const current = await this.get(societyId, id);
+    if (await repository.hasRules(societyId, id)) throw new ApiError(409, 'This charge type has rate history. Set it to Inactive instead of deleting it');
+    await repository.remove(societyId, id, userId);
     await auditRepository.log({ societyId, userId, moduleName: 'charge_types', action: 'delete', recordId: id, oldData: current, ipAddress: meta.ipAddress, userAgent: meta.userAgent });
   }
 }

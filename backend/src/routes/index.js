@@ -11,6 +11,7 @@ import memberRoutes from './member.routes.js';
 import familyDocumentRoutes from './family-document.routes.js';
 import societySettingRoutes from './society-setting.routes.js';
 import chargeTypeRoutes from './charge-type.routes.js';
+import chargeRuleRoutes from './charge-rule.routes.js';
 
 const router = express.Router();
 
@@ -28,6 +29,7 @@ router.use('/society/members', memberRoutes);
 router.use('/society/member-management', familyDocumentRoutes);
 router.use('/society/settings', societySettingRoutes);
 router.use('/society/maintenance/charge-types', chargeTypeRoutes);
+router.use('/society/maintenance/charge-rules', chargeRuleRoutes);
 router.use('/society', societyProfileRoutes);
 
 export default router;
