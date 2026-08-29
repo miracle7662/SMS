@@ -1,63 +1,19 @@
 "use client";
 
-import { Eye, Pencil } from "lucide-react";
-import { PageHeader } from "@/components/layout/PageHeader";
-import { Card } from "@/components/ui/Card";
-import { DataTable, Column } from "@/components/ui/DataTable";
-import { StatusBadge } from "@/components/ui/Badge";
-import { flats } from "@/lib/mock-data";
-import { formatCurrency } from "@/lib/utils";
-
-interface NOCRow {
-  id: string;
-  flatNo: string;
-  building: string;
-  ownerName: string;
-  occupancy: string;
-  ncPercent: number;
-  ncAmount: number;
-  status: "Active" | "Inactive";
+import { useCallback, useEffect, useState } from "react";
+import { AlertTriangle, Building2, Calculator, Eye, IndianRupee } from "lucide-react";
+import { PageHeader } from "@/components/layout/PageHeader"; import { Card, CardBody } from "@/components/ui/Card"; import { Button } from "@/components/ui/Button"; import { Badge } from "@/components/ui/Badge"; import { Column, DataTable } from "@/components/ui/DataTable"; import { Drawer } from "@/components/ui/Drawer"; import { Input } from "@/components/ui/Input"; import { formatCurrency } from "@/lib/utils"; import { getSocietySession } from "@/lib/session";
+const API_URL=process.env.NEXT_PUBLIC_API_URL??"http://localhost:5000/api/v1";
+type Charge={charge_type_id:number;charge_code:string;charge_name:string;category:string;calculation_basis:string;rule_id:number|null;rule_name:string;rate:number;amount:number;gst_rate:number;gst_amount:number;total:number};
+type FlatPreview={flat_id:number;flat_no:string;flat_type:string;building_name:string;wing_name:string;occupancy_status:string;billing_recipient:string|null;maintenance_base:number;subtotal:number;gst_total:number;rounding_adjustment:number;total:number;non_occupancy_amount:number;calculation_warnings:string[];charges:Charge[]};
+type Preview={billing_date:string;settings:{rounding_mode:string;tenant_bill_to:string;non_occupancy_enabled:boolean;non_occupancy_percentage:number};summary:{flat_count:number;rented_flat_count:number;charge_line_count:number;total_amount:number;non_occupancy_total:number};warnings:string[];flats:FlatPreview[]};
+export default function NonOccupancyPage(){
+ const[billingDate,setBillingDate]=useState(new Date().toISOString().slice(0,10));const[preview,setPreview]=useState<Preview|null>(null);const[selected,setSelected]=useState<FlatPreview|null>(null);const[loading,setLoading]=useState(true);const[error,setError]=useState("");
+ const load=useCallback(async(date:string)=>{const s=getSocietySession();if(!s?.accessToken||!s.activeSociety){setError("Please select a society first.");setLoading(false);return;}setLoading(true);setError("");try{const r=await fetch(`${API_URL}/society/maintenance/preview?billing_date=${date}`,{headers:{Authorization:`Bearer ${s.accessToken}`}});const j=await r.json();if(!r.ok||!j.success)throw new Error(Array.isArray(j.errors)?j.errors.join(", "):j.message||"Unable to calculate maintenance preview.");setPreview(j.data);}catch(e){setError(e instanceof Error?e.message:"Unable to calculate preview.");}finally{setLoading(false);}},[]);useEffect(()=>{void load(billingDate);},[load]);
+ const columns:Column<FlatPreview>[]=[{key:"flat_no",header:"Flat",render:r=><span><span className="block font-medium">{r.wing_name}-{r.flat_no}</span><span className="block text-xs text-[var(--color-text-secondary)]">{r.flat_type}</span></span>},{key:"building_name",header:"Building"},{key:"billing_recipient",header:"Bill To",render:r=>r.billing_recipient||"Not assigned"},{key:"occupancy_status",header:"Occupancy",render:r=><Badge>{r.occupancy_status.replaceAll("_"," ")}</Badge>},{key:"maintenance_base",header:"Maintenance Base",render:r=>formatCurrency(r.maintenance_base)},{key:"non_occupancy_amount",header:"Non-Occupancy",render:r=>formatCurrency(r.non_occupancy_amount)},{key:"gst_total",header:"GST",render:r=>formatCurrency(r.gst_total)},{key:"total",header:"Preview Total",render:r=><span className="font-semibold text-[var(--color-primary)]">{formatCurrency(r.total)}</span>}];
+ return <div><PageHeader title="Maintenance Calculation Preview" description="Verify flat-wise charges and non-occupancy before generating bills" actions={<div className="flex items-end gap-2"><Input label="Billing Date" type="date" value={billingDate} onChange={e=>setBillingDate(e.target.value)}/><Button onClick={()=>void load(billingDate)} loading={loading}><Calculator className="h-4 w-4"/> Calculate</Button></div>}/>{error&&<p className="mb-4 rounded-[var(--radius-md)] bg-[var(--color-danger)]/10 px-4 py-3 text-sm text-[var(--color-danger)]">{error}</p>}{preview?.warnings.map(w=><p key={w} className="mb-3 flex items-center gap-2 rounded-[var(--radius-md)] bg-[var(--color-warning-bg)] px-4 py-3 text-sm text-[var(--color-warning)]"><AlertTriangle className="h-4 w-4"/>{w}</p>)}
+ {preview&&<><div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-5"><Summary icon={<Building2 className="h-4 w-4"/>} label="Active Flats" value={String(preview.summary.flat_count)}/><Summary icon={<Building2 className="h-4 w-4"/>} label="Rented Flats" value={String(preview.summary.rented_flat_count)}/><Summary icon={<Calculator className="h-4 w-4"/>} label="Charge Lines" value={String(preview.summary.charge_line_count)}/><Summary icon={<IndianRupee className="h-4 w-4"/>} label="Non-Occupancy" value={formatCurrency(preview.summary.non_occupancy_total)}/><Summary icon={<IndianRupee className="h-4 w-4"/>} label="Total Preview" value={formatCurrency(preview.summary.total_amount)}/></div><Card><DataTable columns={columns} data={preview.flats} keyField="flat_id" searchFields={["flat_no","building_name","wing_name","billing_recipient"]} searchPlaceholder={loading?"Calculating...":"Search flats..."} filters={[{key:"occupancy_status",label:"Occupancy",options:["OWNER_OCCUPIED","RENTED","VACANT"]}]} rowActions={[{label:"View Breakdown",icon:<Eye className="h-4 w-4"/>,onClick:setSelected}]}/></Card></>}
+ <Drawer open={Boolean(selected)} onClose={()=>setSelected(null)} title={selected?`${selected.wing_name}-${selected.flat_no} Charge Breakdown`:"Charge Breakdown"} description={selected?`${selected.building_name} • ${selected.occupancy_status.replaceAll("_"," ")}`:""} width="620px" footer={<Button onClick={()=>setSelected(null)}>Close</Button>}>{selected&&<div className="flex flex-col gap-4">{selected.calculation_warnings.map(w=><p key={w} className="rounded-md bg-[var(--color-warning-bg)] p-3 text-xs text-[var(--color-warning)]">{w}</p>)}<div className="overflow-hidden rounded-[var(--radius-md)] border border-[var(--color-border)]"><table className="w-full text-sm"><thead className="bg-[var(--color-bg)] text-left text-xs uppercase text-[var(--color-text-secondary)]"><tr><th className="px-3 py-2">Charge</th><th className="px-3 py-2">Rule</th><th className="px-3 py-2 text-right">Amount</th><th className="px-3 py-2 text-right">GST</th><th className="px-3 py-2 text-right">Total</th></tr></thead><tbody>{selected.charges.map(c=><tr key={c.charge_type_id} className="border-t border-[var(--color-border)]"><td className="px-3 py-2"><span className="block font-medium">{c.charge_name}</span><span className="text-xs text-[var(--color-text-secondary)]">{c.calculation_basis.replaceAll("_"," ")}</span></td><td className="px-3 py-2 text-xs">{c.rule_name}</td><td className="px-3 py-2 text-right">{formatCurrency(c.amount)}</td><td className="px-3 py-2 text-right">{formatCurrency(c.gst_amount)}</td><td className="px-3 py-2 text-right font-medium">{formatCurrency(c.total)}</td></tr>)}</tbody></table></div><div className="space-y-2 rounded-[var(--radius-md)] bg-[var(--color-bg)] p-3 text-sm"><Total label="Subtotal" value={selected.subtotal}/><Total label="GST" value={selected.gst_total}/><Total label="Rounding" value={selected.rounding_adjustment}/><Total label="Preview Total" value={selected.total} strong/></div></div>}</Drawer></div>;
 }
-
-const rows: NOCRow[] = flats
-  .filter((f) => f.occupancy === "Rented")
-  .map((f, i) => ({
-    id: f.id,
-    flatNo: f.flatNo,
-    building: f.building,
-    ownerName: f.ownerName,
-    occupancy: f.occupancy,
-    ncPercent: 10,
-    ncAmount: 320 + (i % 4) * 80,
-    status: "Active",
-  }));
-
-export default function NonOccupancyPage() {
-  const columns: Column<NOCRow>[] = [
-    { key: "flatNo", header: "Flat" },
-    { key: "building", header: "Building" },
-    { key: "ownerName", header: "Owner" },
-    { key: "occupancy", header: "Occupancy" },
-    { key: "ncPercent", header: "NOC %", render: (r) => `${r.ncPercent}%` },
-    { key: "ncAmount", header: "NOC Amount", render: (r) => formatCurrency(r.ncAmount) },
-    { key: "status", header: "Status", render: (r) => <StatusBadge status={r.status} /> },
-  ];
-
-  return (
-    <div>
-      <PageHeader title="Non-Occupancy Charges" description="Charges applicable to rented / non-owner-occupied flats" />
-      <Card>
-        <DataTable
-          columns={columns}
-          data={rows}
-          keyField="id"
-          searchPlaceholder="Search flats..."
-          rowActions={[
-            { label: "View", icon: <Eye className="h-4 w-4" />, onClick: () => {} },
-            { label: "Edit Rate", icon: <Pencil className="h-4 w-4" />, onClick: () => {} },
-          ]}
-        />
-      </Card>
-    </div>
-  );
-}
+function Summary({icon,label,value}:{icon:React.ReactNode;label:string;value:string}){return <Card><CardBody className="flex items-center gap-3 p-4"><span className="text-[var(--color-primary)]">{icon}</span><span><span className="block text-xs text-[var(--color-text-secondary)]">{label}</span><span className="block font-semibold text-[var(--color-text)]">{value}</span></span></CardBody></Card>}
+function Total({label,value,strong=false}:{label:string;value:number;strong?:boolean}){return <div className={`flex justify-between ${strong?"border-t border-[var(--color-border)] pt-2 font-semibold":""}`}><span>{label}</span><span>{formatCurrency(value)}</span></div>}
