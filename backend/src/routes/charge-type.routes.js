@@ -1,0 +1,12 @@
+import express from 'express';
+import { createChargeType, deleteChargeType, listChargeTypes, updateChargeType } from '../controllers/charge-type.controller.js';
+import { authenticate } from '../middleware/authenticate.middleware.js';
+import { authorizePermissions, requireActiveSociety } from '../middleware/authorize.middleware.js';
+import { handleValidationErrors } from '../validators/auth.validators.js';
+import { validateChargeType, validateChargeTypeId } from '../validators/charge-type.validators.js';
+const router = express.Router(); router.use(authenticate, requireActiveSociety);
+router.get('/', authorizePermissions('society.charge_types.view'), listChargeTypes);
+router.post('/', authorizePermissions('society.charge_types.create'), validateChargeType, handleValidationErrors, createChargeType);
+router.put('/:id', authorizePermissions('society.charge_types.update'), validateChargeTypeId, validateChargeType, handleValidationErrors, updateChargeType);
+router.delete('/:id', authorizePermissions('society.charge_types.delete'), validateChargeTypeId, handleValidationErrors, deleteChargeType);
+export default router;

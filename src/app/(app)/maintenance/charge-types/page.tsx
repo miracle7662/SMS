@@ -1,80 +1,31 @@
 "use client";
 
-import { useState } from "react";
-import { Plus, Pencil, Trash2 } from "lucide-react";
+import { FormEvent, useCallback, useEffect, useState } from "react";
+import { Pencil, Plus, Trash2 } from "lucide-react";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
-import { DataTable, Column } from "@/components/ui/DataTable";
-import { StatusBadge } from "@/components/ui/Badge";
+import { Badge, StatusBadge } from "@/components/ui/Badge";
+import { Column, DataTable } from "@/components/ui/DataTable";
 import { Drawer } from "@/components/ui/Drawer";
-import { Input, Select } from "@/components/ui/Input";
+import { Input, Select, Switch, Textarea } from "@/components/ui/Input";
+import { getSocietySession } from "@/lib/session";
 
-interface ChargeType {
-  id: string;
-  name: string;
-  calculationBasis: string;
-  defaultAmount: string;
-  status: "Active" | "Inactive";
-}
+const API_URL=process.env.NEXT_PUBLIC_API_URL??"http://localhost:5000/api/v1";
+type ChargeType={id:number;charge_code:string;charge_name:string;category:string;calculation_basis:string;default_rate:number|null;billing_frequency:string;is_taxable:boolean;gst_rate:number;description:string|null;display_order:number;status:"ACTIVE"|"INACTIVE"};
+type FormState=Omit<ChargeType,"id">;
+const blank:FormState={charge_code:"",charge_name:"",category:"MAINTENANCE",calculation_basis:"FIXED",default_rate:null,billing_frequency:"INHERIT",is_taxable:false,gst_rate:0,description:null,display_order:0,status:"ACTIVE"};
+const basisLabels:Record<string,string>={FIXED:"Fixed Amount",PER_CARPET_SQFT:"Per Carpet Sq. Ft.",PER_BUILTUP_SQFT:"Per Built-up Sq. Ft.",PERCENTAGE_OF_MAINTENANCE:"% of Maintenance",FLAT_TYPE:"Flat Type Based",MANUAL:"Manual Amount"};
+const frequencyLabels:Record<string,string>={INHERIT:"Use Society Billing Cycle",MONTHLY:"Monthly",QUARTERLY:"Quarterly",HALF_YEARLY:"Half-Yearly",YEARLY:"Yearly",ONE_TIME:"One Time"};
 
-const chargeTypes: ChargeType[] = [
-  { id: "CT1", name: "Monthly Maintenance", calculationBasis: "Per Sq. Ft.", defaultAmount: "₹4.50 / sqft", status: "Active" },
-  { id: "CT2", name: "Non-Occupancy Charge", calculationBasis: "% of Maintenance", defaultAmount: "10%", status: "Active" },
-  { id: "CT3", name: "Parking Charge", calculationBasis: "Fixed Amount", defaultAmount: "₹500 / month", status: "Active" },
-  { id: "CT4", name: "Water Charge", calculationBasis: "Flat Type Based", defaultAmount: "₹350 – ₹700", status: "Active" },
-  { id: "CT5", name: "Sinking Fund", calculationBasis: "Fixed Amount", defaultAmount: "₹450 / month", status: "Active" },
-  { id: "CT6", name: "Repair Fund", calculationBasis: "Fixed Amount", defaultAmount: "₹350 / month", status: "Active" },
-  { id: "CT7", name: "Late Fee", calculationBasis: "% per month", defaultAmount: "2% of due", status: "Active" },
-  { id: "CT8", name: "Other Charge", calculationBasis: "Fixed Amount", defaultAmount: "Variable", status: "Inactive" },
-];
-
-export default function ChargeTypesPage() {
-  const [drawerOpen, setDrawerOpen] = useState(false);
-
-  const columns: Column<ChargeType>[] = [
-    { key: "name", header: "Charge Type" },
-    { key: "calculationBasis", header: "Calculation Basis" },
-    { key: "defaultAmount", header: "Default Amount" },
-    { key: "status", header: "Status", render: (c) => <StatusBadge status={c.status} /> },
-  ];
-
-  return (
-    <div>
-      <PageHeader
-        title="Charge Types"
-        description="Define the types of charges billed to members"
-        actions={<Button onClick={() => setDrawerOpen(true)}><Plus className="h-4 w-4" /> Add Charge Type</Button>}
-      />
-      <Card>
-        <DataTable
-          columns={columns}
-          data={chargeTypes}
-          keyField="id"
-          searchPlaceholder="Search charge types..."
-          rowActions={[
-            { label: "Edit", icon: <Pencil className="h-4 w-4" />, onClick: () => setDrawerOpen(true) },
-            { label: "Delete", icon: <Trash2 className="h-4 w-4" />, onClick: () => {}, danger: true },
-          ]}
-        />
-      </Card>
-
-      <Drawer
-        open={drawerOpen}
-        onClose={() => setDrawerOpen(false)}
-        title="Add Charge Type"
-        footer={<><Button variant="outline" onClick={() => setDrawerOpen(false)}>Cancel</Button><Button onClick={() => setDrawerOpen(false)}>Save</Button></>}
-      >
-        <div className="flex flex-col gap-4">
-          <Input label="Charge Name" required placeholder="e.g. Clubhouse Fund" />
-          <Select
-            label="Calculation Basis"
-            required
-            options={["Fixed Amount", "Per Sq. Ft.", "Flat Type Based", "% of Maintenance"].map((v) => ({ label: v, value: v }))}
-          />
-          <Input label="Default Amount" required placeholder="e.g. 500" />
-        </div>
-      </Drawer>
-    </div>
-  );
+export default function ChargeTypesPage(){
+ const[rows,setRows]=useState<ChargeType[]>([]);const[open,setOpen]=useState(false);const[editingId,setEditingId]=useState<number|null>(null);const[form,setForm]=useState<FormState>(blank);const[loading,setLoading]=useState(true);const[saving,setSaving]=useState(false);const[error,setError]=useState("");const[success,setSuccess]=useState("");
+ const load=useCallback(async()=>{const s=getSocietySession();if(!s?.accessToken||!s.activeSociety){setError("Please select a society first.");setLoading(false);return;}try{const r=await fetch(`${API_URL}/society/maintenance/charge-types`,{headers:{Authorization:`Bearer ${s.accessToken}`}});const j=await r.json();if(!r.ok||!j.success)throw new Error(j.message||"Unable to load charge types.");setRows(j.data??[]);}catch(e){setError(e instanceof Error?e.message:"Unable to load charge types.");}finally{setLoading(false);}},[]);useEffect(()=>{void load();},[load]);
+ function create(){setEditingId(null);setForm({...blank,display_order:rows.length+1});setError("");setSuccess("");setOpen(true);} function edit(row:ChargeType){setEditingId(row.id);setForm({...row});setError("");setSuccess("");setOpen(true);}
+ async function submit(e:FormEvent){e.preventDefault();const s=getSocietySession();if(!s?.accessToken)return;setSaving(true);setError("");try{const r=await fetch(`${API_URL}/society/maintenance/charge-types${editingId?`/${editingId}`:""}`,{method:editingId?"PUT":"POST",headers:{"Content-Type":"application/json",Authorization:`Bearer ${s.accessToken}`},body:JSON.stringify(form)});const j=await r.json();if(!r.ok||!j.success)throw new Error(Array.isArray(j.errors)?j.errors.join(", "):j.message||"Unable to save charge type.");setOpen(false);setSuccess(editingId?"Charge type updated successfully.":"Charge type created successfully.");await load();}catch(x){setError(x instanceof Error?x.message:"Unable to save charge type.");}finally{setSaving(false);}}
+ async function remove(row:ChargeType){if(!confirm(`Delete charge type "${row.charge_name}"?`))return;const s=getSocietySession();if(!s?.accessToken)return;try{const r=await fetch(`${API_URL}/society/maintenance/charge-types/${row.id}`,{method:"DELETE",headers:{Authorization:`Bearer ${s.accessToken}`}});const j=await r.json();if(!r.ok||!j.success)throw new Error(j.message||"Unable to delete charge type.");setSuccess("Charge type deleted successfully.");await load();}catch(x){setError(x instanceof Error?x.message:"Unable to delete charge type.");}}
+ const amount=(row:ChargeType)=>{if(row.default_rate===null)return "Defined in rules";if(row.calculation_basis==="PERCENTAGE_OF_MAINTENANCE")return `${row.default_rate}%`;if(row.calculation_basis==="PER_CARPET_SQFT"||row.calculation_basis==="PER_BUILTUP_SQFT")return `₹${row.default_rate} / sqft`;return `₹${row.default_rate}`;};
+ const columns:Column<ChargeType>[]=[{key:"charge_name",header:"Charge Type",render:r=><span><span className="block font-medium text-[var(--color-text)]">{r.charge_name}</span><span className="block text-xs text-[var(--color-text-secondary)]">{r.charge_code}</span></span>},{key:"category",header:"Category",render:r=><Badge>{r.category}</Badge>},{key:"calculation_basis",header:"Calculation Basis",render:r=>basisLabels[r.calculation_basis]},{key:"default_rate",header:"Default Rate",render:amount},{key:"billing_frequency",header:"Frequency",render:r=>frequencyLabels[r.billing_frequency]},{key:"gst_rate",header:"Tax",render:r=>r.is_taxable?`GST ${r.gst_rate}%`:"Non-taxable"},{key:"status",header:"Status",render:r=><StatusBadge status={r.status==="ACTIVE"?"Active":"Inactive"}/>}];
+ return <div><PageHeader title="Charge Types" description="Define society-specific maintenance, fund, utility and tax charges" actions={<Button onClick={create}><Plus className="h-4 w-4"/> Add Charge Type</Button>}/>{error&&<p className="mb-4 rounded-[var(--radius-md)] bg-[var(--color-danger)]/10 px-4 py-3 text-sm text-[var(--color-danger)]">{error}</p>}{success&&<p className="mb-4 rounded-[var(--radius-md)] bg-[var(--color-success-bg)] px-4 py-3 text-sm text-[var(--color-success)]">{success}</p>}<Card><DataTable columns={columns} data={rows} keyField="id" searchFields={["charge_name","charge_code","category"]} searchPlaceholder={loading?"Loading charge types...":"Search charge types..."} filters={[{key:"category",label:"Category",options:["MAINTENANCE","FUND","UTILITY","PARKING","TAX","PENALTY","OTHER"]},{key:"status",label:"Status",options:["ACTIVE","INACTIVE"]}]} rowActions={[{label:"Edit",icon:<Pencil className="h-4 w-4"/>,onClick:edit},{label:"Delete",icon:<Trash2 className="h-4 w-4"/>,onClick:r=>void remove(r),danger:true}]}/></Card>
+ <Drawer open={open} onClose={()=>!saving&&setOpen(false)} title={editingId?"Edit Charge Type":"Add Charge Type"} description="The actual effective rate can be configured in Charge Rules." width="560px" footer={<><Button variant="outline" onClick={()=>setOpen(false)} disabled={saving}>Cancel</Button><Button type="submit" form="charge-type-form" loading={saving}>{editingId?"Update":"Create"}</Button></>}><form id="charge-type-form" onSubmit={submit} className="flex flex-col gap-4"><div className="grid grid-cols-1 gap-4 sm:grid-cols-2"><Input label="Charge Code" required maxLength={50} placeholder="MONTHLY_MAINT" value={form.charge_code} onChange={e=>setForm({...form,charge_code:e.target.value.toUpperCase()})}/><Input label="Charge Name" required maxLength={150} placeholder="Monthly Maintenance" value={form.charge_name} onChange={e=>setForm({...form,charge_name:e.target.value})}/><Select label="Category" required value={form.category} onChange={e=>setForm({...form,category:e.target.value})} options={["MAINTENANCE","FUND","UTILITY","PARKING","TAX","PENALTY","OTHER"].map(value=>({value,label:value}))}/><Select label="Calculation Basis" required value={form.calculation_basis} onChange={e=>setForm({...form,calculation_basis:e.target.value})} options={Object.entries(basisLabels).map(([value,label])=>({value,label}))}/><Input label="Default Rate" type="number" min={0} step="0.0001" value={form.default_rate??""} onChange={e=>setForm({...form,default_rate:e.target.value===""?null:Number(e.target.value)})} helpText="Optional fallback; effective rates are managed in Charge Rules."/><Select label="Billing Frequency" required value={form.billing_frequency} onChange={e=>setForm({...form,billing_frequency:e.target.value})} options={Object.entries(frequencyLabels).map(([value,label])=>({value,label}))}/><Input label="Display Order" type="number" min={0} max={9999} value={form.display_order} onChange={e=>setForm({...form,display_order:Number(e.target.value)})}/><Select label="Status" value={form.status} onChange={e=>setForm({...form,status:e.target.value as "ACTIVE"|"INACTIVE"})} options={[{label:"Active",value:"ACTIVE"},{label:"Inactive",value:"INACTIVE"}]}/></div><Switch checked={form.is_taxable} onChange={is_taxable=>setForm({...form,is_taxable,gst_rate:is_taxable?form.gst_rate:0})} label="GST applicable to this charge"/>{form.is_taxable&&<Input label="GST Rate (%)" type="number" min={0} max={100} step="0.001" value={form.gst_rate} onChange={e=>setForm({...form,gst_rate:Number(e.target.value)})}/>}<Textarea label="Description" maxLength={500} value={form.description??""} onChange={e=>setForm({...form,description:e.target.value||null})}/></form></Drawer></div>;
 }
