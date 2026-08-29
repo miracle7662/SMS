@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import { ChevronDown, ChevronsLeft, Building } from "lucide-react";
+import { ChevronDown, ChevronsLeft, Building, Building2 } from "lucide-react";
 import { NAV } from "@/lib/nav";
 import { ICON_MAP } from "./icon-map";
 import { cn } from "@/lib/utils";
@@ -23,6 +23,20 @@ export function Sidebar({
 }) {
   const pathname = usePathname();
   const [openGroups, setOpenGroups] = useState<Set<string>>(new Set());
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+
+  useEffect(() => {
+    const storages = [window.localStorage, window.sessionStorage];
+    const hasSuperAdminRole = storages.some((storage) => {
+      try {
+        const roles = JSON.parse(storage.getItem("society_platform_roles") || "[]");
+        return Array.isArray(roles) && roles.includes("SUPER_ADMIN");
+      } catch {
+        return false;
+      }
+    });
+    setIsSuperAdmin(hasSuperAdminRole);
+  }, []);
 
   useEffect(() => {
     // auto expand the group matching current path
@@ -82,6 +96,24 @@ export function Sidebar({
         {/* Nav */}
         <nav className="scrollbar-none flex-1 overflow-y-auto px-2.5 py-3">
           <ul className="flex flex-col gap-0.5">
+            {isSuperAdmin && (
+              <li className="group relative">
+                <Link
+                  href="/super-admin/societies"
+                  onClick={onCloseMobile}
+                  className={cn(
+                    "flex items-center gap-3 rounded-[var(--radius-md)] px-3 py-2.5 text-sm font-medium transition-colors",
+                    pathname.startsWith("/super-admin/societies")
+                      ? "bg-[var(--color-primary)]/10 text-[var(--color-primary)]"
+                      : "text-[var(--color-text-secondary)] hover:bg-[var(--color-bg)] hover:text-[var(--color-text)]",
+                    collapsed && "lg:justify-center"
+                  )}
+                >
+                  <Building2 className="h-[18px] w-[18px] shrink-0" />
+                  {!collapsed && <span className="truncate">Manage Societies</span>}
+                </Link>
+              </li>
+            )}
             {NAV.map((item) => {
               const Icon = ICON_MAP[item.icon];
               const active = isActiveParent(item.href);

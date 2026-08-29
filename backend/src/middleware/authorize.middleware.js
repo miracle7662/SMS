@@ -35,6 +35,19 @@ export const authorizeRoles = (...allowedRoles) => {
   };
 };
 
+export const authorizePlatformRoles = (...allowedRoles) => {
+  return (req, res, next) => {
+    const platformRoles = req.auth?.platformRoles || [];
+    const hasRole = allowedRoles.some((role) => platformRoles.includes(role));
+
+    if (!hasRole) {
+      return sendError(res, 403, 'You do not have permission for this platform action');
+    }
+
+    next();
+  };
+};
+
 export const authorizePermissions = (...permissionCodes) => {
   return asyncHandler(async (req, res, next) => {
     const userId = req.auth.userId;
@@ -70,5 +83,6 @@ export const authorizePermissions = (...permissionCodes) => {
 export default {
   requireActiveSociety,
   authorizeRoles,
+  authorizePlatformRoles,
   authorizePermissions,
 };

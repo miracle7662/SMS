@@ -35,12 +35,27 @@ export default function LoginPage() {
       }
 
       const storage = rememberMe ? window.localStorage : window.sessionStorage;
-      storage.setItem("society_access_token", result.data.access_token);
-      storage.setItem("society_refresh_token", result.data.refresh_token);
+      const accessToken = result.data.access_token ?? result.data.accessToken;
+      const refreshToken = result.data.refresh_token ?? result.data.refreshToken;
+      const platformRoles = result.data.platform_roles ?? result.data.platformRoles ?? [];
+
+      if (!accessToken || !refreshToken) {
+        throw new Error("Login response did not include authentication tokens.");
+      }
+
+      storage.setItem("society_access_token", accessToken);
+      storage.setItem("society_refresh_token", refreshToken);
       storage.setItem("society_user", JSON.stringify(result.data.user));
       storage.setItem("society_societies", JSON.stringify(result.data.societies ?? []));
+      storage.setItem("society_platform_roles", JSON.stringify(platformRoles));
 
-      const redirectPath = result.data.requires_society_selection === true ? "/select-society" : "/dashboard";
+      const isSuperAdmin = platformRoles.includes("SUPER_ADMIN");
+      const requiresSocietySelection = result.data.requires_society_selection ?? result.data.requiresSocietySelection;
+      const redirectPath = isSuperAdmin
+        ? "/super-admin/societies"
+        : requiresSocietySelection === true
+          ? "/select-society"
+          : "/dashboard";
       router.push(redirectPath);
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : "Unable to sign in. Please try again.");
