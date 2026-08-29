@@ -49,6 +49,7 @@ class MaintenancePreviewService {
       const flatMembers = members.filter((member) => Number(member.flat_id) === Number(flat.id) && member.status === 'ACTIVE');
       const owner = flatMembers.find((member) => member.member_type === 'OWNER') || flatMembers.find((member) => member.member_type === 'CO_OWNER');
       const tenant = flatMembers.find((member) => member.member_type === 'TENANT');
+      const recipient = settings.tenant_bill_to === 'TENANT' && tenant ? tenant : owner || tenant || null;
       const selected = activeTypes.map((type) => {
         if (type.charge_code === 'NON_OCCUPANCY' && (!settings.non_occupancy_enabled || flat.occupancy_status !== 'RENTED')) return null;
         const rule = selectRule(rules, type.id, flat, billingDate);
@@ -85,7 +86,8 @@ class MaintenancePreviewService {
       return {
         flat_id: flat.id, flat_no: flat.flat_no, flat_type: flat.flat_type, building_name: flat.building_name,
         wing_name: flat.wing_name, occupancy_status: flat.occupancy_status,
-        billing_recipient: settings.tenant_bill_to === 'TENANT' && tenant ? tenant.name : owner?.name || tenant?.name || null,
+        billing_recipient_member_id: recipient?.member_id || null, billing_recipient: recipient?.name || null,
+        billing_recipient_mobile: recipient?.mobile || null, billing_recipient_email: recipient?.email || null,
         maintenance_base: maintenanceBase, subtotal, gst_total: gstTotal, rounding_adjustment: round2(total - unroundedTotal), total,
         non_occupancy_amount: round2(lines.filter((line) => line.charge_code === 'NON_OCCUPANCY').reduce((sum, line) => sum + line.amount, 0)),
         calculation_warnings: calculationWarnings, charges: lines,

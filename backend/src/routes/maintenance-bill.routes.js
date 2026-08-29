@@ -1,0 +1,11 @@
+import express from 'express';
+import { generateBills, getBill, listBills } from '../controllers/maintenance-bill.controller.js';
+import { authenticate } from '../middleware/authenticate.middleware.js';
+import { authorizePermissions, requireActiveSociety } from '../middleware/authorize.middleware.js';
+import { handleValidationErrors } from '../validators/auth.validators.js';
+import { validateBillId, validateGenerateBills } from '../validators/maintenance-bill.validators.js';
+const router = express.Router(); router.use(authenticate, requireActiveSociety);
+router.get('/', authorizePermissions('society.bills.view'), listBills);
+router.get('/:id', authorizePermissions('society.bills.view'), validateBillId, handleValidationErrors, getBill);
+router.post('/generate', authorizePermissions('society.bills.generate'), validateGenerateBills, handleValidationErrors, generateBills);
+export default router;

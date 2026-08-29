@@ -1,46 +1,6 @@
 "use client";
-
-import { Eye, Download, Send } from "lucide-react";
-import { Card } from "@/components/ui/Card";
-import { DataTable, Column } from "@/components/ui/DataTable";
-import { StatusBadge } from "@/components/ui/Badge";
-import { maintenanceBills } from "@/lib/mock-data";
-import { MaintenanceBill } from "@/types";
-import { formatCurrency, formatDate } from "@/lib/utils";
-
-export function BillsList({ statuses }: { statuses?: MaintenanceBill["status"][] }) {
-  const data = statuses ? maintenanceBills.filter((b) => statuses.includes(b.status)) : maintenanceBills;
-
-  const columns: Column<MaintenanceBill>[] = [
-    { key: "billNo", header: "Bill No." },
-    { key: "flatNo", header: "Flat" },
-    { key: "building", header: "Building" },
-    { key: "ownerName", header: "Owner" },
-    { key: "month", header: "Month" },
-    { key: "amount", header: "Amount", render: (b) => formatCurrency(b.amount), sortAccessor: (b) => b.amount },
-    { key: "dueDate", header: "Due Date", render: (b) => formatDate(b.dueDate), sortAccessor: (b) => b.dueDate },
-    { key: "status", header: "Status", render: (b) => <StatusBadge status={b.status} /> },
-  ];
-
-  return (
-    <Card>
-      <DataTable
-        columns={columns}
-        data={data}
-        keyField="id"
-        searchPlaceholder="Search bills by flat, owner, bill no..."
-        filters={[
-          { key: "status", label: "Status", options: ["Paid", "Unpaid", "Overdue"] },
-          { key: "building", label: "Building", options: Array.from(new Set(maintenanceBills.map((b) => b.building))) },
-        ]}
-        rowActions={[
-          { label: "View Bill", icon: <Eye className="h-4 w-4" />, onClick: () => {} },
-          { label: "Download PDF", icon: <Download className="h-4 w-4" />, onClick: () => {} },
-          { label: "Send Reminder", icon: <Send className="h-4 w-4" />, onClick: () => {} },
-        ]}
-        bulkActions={[{ label: "Send Reminders", onClick: () => {} }, { label: "Export Selected", onClick: () => {} }]}
-        onExport={() => {}}
-      />
-    </Card>
-  );
-}
+import { useCallback,useEffect,useState } from "react";import { Eye } from "lucide-react";import { Card } from "@/components/ui/Card";import { Column,DataTable } from "@/components/ui/DataTable";import { StatusBadge } from "@/components/ui/Badge";import { Drawer } from "@/components/ui/Drawer";import { Button } from "@/components/ui/Button";import { formatCurrency,formatDate } from "@/lib/utils";import { getSocietySession } from "@/lib/session";
+const API_URL=process.env.NEXT_PUBLIC_API_URL??"http://localhost:5000/api/v1";type Bill={id:number;bill_number:string;financial_year:string;billing_date:string;period_start:string;period_end:string;due_date:string;recipient_name:string|null;total_amount:number;paid_amount:number;balance_amount:number;status:string;flat_no:string;building_name:string;wing_name:string};type Item={id:number;charge_name:string;calculation_basis:string;applied_rate:number;base_amount:number;gst_amount:number;line_total:number};type Detail=Bill&{subtotal:number;gst_total:number;rounding_adjustment:number;items:Item[]};
+export function BillsList({statuses}:{statuses?:string[]}){const[rows,setRows]=useState<Bill[]>([]);const[selected,setSelected]=useState<Detail|null>(null);const[error,setError]=useState("");const[loading,setLoading]=useState(true);const load=useCallback(async()=>{const s=getSocietySession();if(!s?.accessToken)return setError("Please login and select a society.");try{const r=await fetch(`${API_URL}/society/maintenance/bills`,{headers:{Authorization:`Bearer ${s.accessToken}`}});const j=await r.json();if(!r.ok||!j.success)throw new Error(j.message);setRows(j.data??[]);}catch(e){setError(e instanceof Error?e.message:"Unable to load bills.");}finally{setLoading(false);}},[]);useEffect(()=>{void load();},[load]);async function view(row:Bill){const s=getSocietySession();if(!s?.accessToken)return;const r=await fetch(`${API_URL}/society/maintenance/bills/${row.id}`,{headers:{Authorization:`Bearer ${s.accessToken}`}});const j=await r.json();if(!r.ok||!j.success)return setError(j.message);setSelected(j.data);}
+const data=statuses?rows.filter(r=>statuses.includes(r.status)):rows;const columns:Column<Bill>[]=[{key:"bill_number",header:"Bill No."},{key:"flat_no",header:"Flat",render:r=>`${r.wing_name}-${r.flat_no}`},{key:"building_name",header:"Building"},{key:"recipient_name",header:"Bill To",render:r=>r.recipient_name||"—"},{key:"period_start",header:"Period",render:r=>`${formatDate(r.period_start)} – ${formatDate(r.period_end)}`},{key:"total_amount",header:"Amount",render:r=>formatCurrency(r.total_amount)},{key:"balance_amount",header:"Balance",render:r=>formatCurrency(r.balance_amount)},{key:"due_date",header:"Due Date",render:r=>formatDate(r.due_date)},{key:"status",header:"Status",render:r=><StatusBadge status={r.status.replaceAll("_"," ").replace(/\b\w/g,c=>c.toUpperCase())}/>}];return <>{error&&<p className="mb-4 rounded-md bg-[var(--color-danger)]/10 p-3 text-sm text-[var(--color-danger)]">{error}</p>}<Card><DataTable columns={columns} data={data} keyField="id" searchFields={["bill_number","flat_no","building_name","recipient_name"]} searchPlaceholder={loading?"Loading bills...":"Search bills..."} filters={[{key:"status",label:"Status",options:["UNPAID","PARTIALLY_PAID","PAID","OVERDUE","CANCELLED"]}]} rowActions={[{label:"View Bill",icon:<Eye className="h-4 w-4"/>,onClick:r=>void view(r)}]}/></Card><Drawer open={Boolean(selected)} onClose={()=>setSelected(null)} title={selected?.bill_number??"Bill Details"} description={selected?`${selected.building_name} / ${selected.wing_name}-${selected.flat_no}`:""} width="650px" footer={<Button onClick={()=>setSelected(null)}>Close</Button>}>{selected&&<div className="flex flex-col gap-4"><div className="grid grid-cols-2 gap-3 rounded-md bg-[var(--color-bg)] p-3 text-sm"><span>Bill To: <strong>{selected.recipient_name||"—"}</strong></span><span>Due: <strong>{formatDate(selected.due_date)}</strong></span><span>Period: {formatDate(selected.period_start)} – {formatDate(selected.period_end)}</span><span>Status: <strong>{selected.status}</strong></span></div><div className="overflow-hidden rounded-md border border-[var(--color-border)]"><table className="w-full text-sm"><thead className="bg-[var(--color-bg)] text-left text-xs uppercase"><tr><th className="px-3 py-2">Charge</th><th className="px-3 py-2 text-right">Base</th><th className="px-3 py-2 text-right">GST</th><th className="px-3 py-2 text-right">Total</th></tr></thead><tbody>{selected.items.map(i=><tr key={i.id} className="border-t border-[var(--color-border)]"><td className="px-3 py-2">{i.charge_name}</td><td className="px-3 py-2 text-right">{formatCurrency(i.base_amount)}</td><td className="px-3 py-2 text-right">{formatCurrency(i.gst_amount)}</td><td className="px-3 py-2 text-right font-medium">{formatCurrency(i.line_total)}</td></tr>)}</tbody></table></div><div className="space-y-2 rounded-md bg-[var(--color-bg)] p-3 text-sm"><Line label="Subtotal" value={selected.subtotal}/><Line label="GST" value={selected.gst_total}/><Line label="Rounding" value={selected.rounding_adjustment}/><Line label="Total" value={selected.total_amount} strong/><Line label="Balance" value={selected.balance_amount} strong/></div></div>}</Drawer></>}
+function Line({label,value,strong=false}:{label:string;value:number;strong?:boolean}){return <div className={`flex justify-between ${strong?"border-t border-[var(--color-border)] pt-2 font-semibold":""}`}><span>{label}</span><span>{formatCurrency(value)}</span></div>}

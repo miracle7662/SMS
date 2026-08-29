@@ -13,6 +13,7 @@ import societySettingRoutes from './society-setting.routes.js';
 import chargeTypeRoutes from './charge-type.routes.js';
 import chargeRuleRoutes from './charge-rule.routes.js';
 import maintenancePreviewRoutes from './maintenance-preview.routes.js';
+import maintenanceBillRoutes from './maintenance-bill.routes.js';
 
 const router = express.Router();
 
@@ -32,6 +33,7 @@ router.use('/society/settings', societySettingRoutes);
 router.use('/society/maintenance/charge-types', chargeTypeRoutes);
 router.use('/society/maintenance/charge-rules', chargeRuleRoutes);
 router.use('/society/maintenance/preview', maintenancePreviewRoutes);
+router.use('/society/maintenance/bills', maintenanceBillRoutes);
 router.use('/society', societyProfileRoutes);
 
 export default router;
