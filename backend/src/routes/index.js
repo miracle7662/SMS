@@ -20,6 +20,7 @@ import maintenanceReportRoutes from './maintenance-report.routes.js';
 import noticeRoutes from './notice.routes.js';
 import complaintRoutes from './complaint.routes.js';
 import visitorRoutes from './visitor.routes.js';
+import parkingRoutes from './parking.routes.js';
 
 const router = express.Router();
 
@@ -46,6 +47,7 @@ router.use('/society/reports', maintenanceReportRoutes);
 router.use('/society/notices', noticeRoutes);
 router.use('/society/complaints', complaintRoutes);
 router.use('/society/visitors', visitorRoutes);
+router.use('/society/parking', parkingRoutes);
 router.use('/society', societyProfileRoutes);
 
 export default router;
