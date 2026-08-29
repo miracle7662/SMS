@@ -1,74 +1,53 @@
-import jwt from 'jsonwebtoken';
-import { getPool } from '../config/database.js';  // ✅ हे बरोबर आहे का?
+import { verifyAccessToken } from '../utils/token-utils.js';
+import userRepository from '../repositories/user.repository.js';
+import societyAccessRepository from '../repositories/society-access.repository.js';
+import { ApiError } from '../utils/api-error.js';
+import { asyncHandler } from '../utils/async-handler.js';
 
-export const authenticate = async (req, res, next) => {
-  try {
-    const authHeader = req.headers.authorization;
-    
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return res.status(401).json({
-        success: false,
-        message: 'No token provided'
-      });
-    }
-
-    const token = authHeader.split(' ')[1];
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    
-    const pool = getPool();  // ✅ हे काम करेल
-    const [users] = await pool.execute(
-      `SELECT id, name, mobile, email, profile_image, status 
-       FROM users 
-       WHERE id = ? AND deleted_at IS NULL AND status = 'ACTIVE'`,
-      [decoded.id]
-    );
-
-    if (users.length === 0) {
-      return res.status(401).json({
-        success: false,
-        message: 'User not found'
-      });
-    }
-
-    const user = users[0];
-    
-    const [roles] = await pool.execute(`
-      SELECT r.role_code 
-      FROM user_roles ur
-      INNER JOIN roles r ON ur.role_id = r.id
-      WHERE ur.user_id = ? AND r.status = 'ACTIVE'
-    `, [user.id]);
-
-    const isSuperAdmin = roles.some(r => r.role_code === 'SUPER_ADMIN');
-
-    req.user = {
-      id: user.id,
-      name: user.name,
-      mobile: user.mobile,
-      email: user.email,
-      role: isSuperAdmin ? 'super_admin' : 'user',
-      isSuperAdmin: isSuperAdmin,
-      societyId: decoded.societyId || null
-    };
-
-    next();
-  } catch (error) {
-    if (error.name === 'JsonWebTokenError') {
-      return res.status(401).json({
-        success: false,
-        message: 'Invalid token'
-      });
-    }
-    if (error.name === 'TokenExpiredError') {
-      return res.status(401).json({
-        success: false,
-        message: 'Token expired'
-      });
-    }
-    console.error('Authentication error:', error);
-    return res.status(500).json({
-      success: false,
-      message: 'Authentication error'
-    });
+export const authenticate = asyncHandler(async (req, res, next) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader?.startsWith('Bearer ')) {
+    throw new ApiError(401, 'Authentication token is required');
   }
-};
+
+  let decoded;
+  try {
+    decoded = verifyAccessToken(authHeader.slice(7).trim());
+  } catch {
+    throw new ApiError(401, 'Authentication token is invalid or expired');
+  }
+
+  if (decoded.tokenType !== 'access' || !decoded.sub) {
+    throw new ApiError(401, 'Invalid access token');
+  }
+
+  const user = await userRepository.findById(decoded.sub);
+  if (!user || user.status !== 'ACTIVE') {
+    throw new ApiError(401, 'User account is not active');
+  }
+
+  const platformRoles = await societyAccessRepository.getUserRoles(user.id);
+  const activeSocietyId = decoded.activeSocietyId ? Number(decoded.activeSocietyId) : null;
+  const societyRoles = activeSocietyId
+    ? await societyAccessRepository.getUserRoles(user.id, activeSocietyId)
+    : [];
+
+  req.auth = {
+    userId: user.id,
+    activeSocietyId,
+    platformRoles: platformRoles.map((role) => role.role_code),
+    roles: societyRoles.map((role) => role.role_code),
+  };
+
+  // Compatibility for controllers that still read req.user.
+  req.user = {
+    id: user.id,
+    name: user.name,
+    mobile: user.mobile,
+    email: user.email,
+    isSuperAdmin: req.auth.platformRoles.includes('SUPER_ADMIN'),
+    societyId: activeSocietyId,
+  };
+
+  next();
+});

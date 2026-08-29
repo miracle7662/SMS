@@ -6,7 +6,8 @@ class UserRepository {
   static async findByMobileOrEmail(login) {
     const pool = getPool();
     const [rows] = await pool.execute(
-      `SELECT id, name, mobile, email, password_hash, profile_image, status 
+      `SELECT id, name, mobile, email, password_hash, profile_image, status,
+              failed_login_attempts, locked_until, password_changed_at, last_login
        FROM users 
        WHERE (mobile = ? OR email = ?) 
          AND deleted_at IS NULL 
@@ -14,6 +15,49 @@ class UserRepository {
       [login, login]
     );
     return rows[0] || null;
+  }
+
+  static async findById(id) {
+    const pool = getPool();
+    const [rows] = await pool.execute(
+      `SELECT id, name, mobile, email, profile_image, status,
+              failed_login_attempts, locked_until, password_changed_at, last_login
+       FROM users
+       WHERE id = ? AND deleted_at IS NULL
+       LIMIT 1`,
+      [id]
+    );
+    return rows[0] || null;
+  }
+
+  static async incrementFailedLoginAttempts(id) {
+    const pool = getPool();
+    await pool.execute(
+      `UPDATE users
+       SET failed_login_attempts = failed_login_attempts + 1
+       WHERE id = ? AND deleted_at IS NULL`,
+      [id]
+    );
+  }
+
+  static async updateFailedLoginAttemptsAndLock(id, lockedUntil) {
+    const pool = getPool();
+    await pool.execute(
+      `UPDATE users
+       SET failed_login_attempts = failed_login_attempts + 1, locked_until = ?
+       WHERE id = ? AND deleted_at IS NULL`,
+      [lockedUntil, id]
+    );
+  }
+
+  static async resetFailedLoginAttempts(id) {
+    const pool = getPool();
+    await pool.execute(
+      `UPDATE users
+       SET failed_login_attempts = 0, locked_until = NULL, last_login = UTC_TIMESTAMP()
+       WHERE id = ? AND deleted_at IS NULL`,
+      [id]
+    );
   }
 
   // User by ID
