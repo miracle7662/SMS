@@ -1,0 +1,714 @@
+From c26906a99b80e8d2af4d4e9a8bb6293dd142773c Mon Sep 17 00:00:00 2001
+From: Codex <codex@openai.com>
+Date: Sat, 29 Aug 2026 16:48:42 +0000
+Subject: [PATCH] feat: manage flat owners and tenants
+
+---
+ .../005_members_and_flat_assignments.sql      |  66 +++++++++
+ backend/src/controllers/member.controller.js  |  11 ++
+ backend/src/repositories/member.repository.js | 126 ++++++++++++++++++
+ backend/src/routes/index.js                   |   2 +
+ backend/src/routes/member.routes.js           |  14 ++
+ backend/src/services/member.service.js        |  64 +++++++++
+ backend/src/validators/member.validators.js   |  17 +++
+ src/app/(app)/members/co-owners/page.tsx      |  10 +-
+ src/app/(app)/members/owners/page.tsx         |  10 +-
+ src/app/(app)/members/page.tsx                |  89 +------------
+ src/app/(app)/members/tenants/page.tsx        | 109 +--------------
+ src/components/modules/SocietyMembers.tsx     |  80 +++++++++++
+ 12 files changed, 388 insertions(+), 210 deletions(-)
+ create mode 100644 backend/database/migrations/005_members_and_flat_assignments.sql
+ create mode 100644 backend/src/controllers/member.controller.js
+ create mode 100644 backend/src/repositories/member.repository.js
+ create mode 100644 backend/src/routes/member.routes.js
+ create mode 100644 backend/src/services/member.service.js
+ create mode 100644 backend/src/validators/member.validators.js
+ create mode 100644 src/components/modules/SocietyMembers.tsx
+
+diff --git a/backend/database/migrations/005_members_and_flat_assignments.sql b/backend/database/migrations/005_members_and_flat_assignments.sql
+new file mode 100644
+index 0000000..3fa5979
+--- /dev/null
++++ b/backend/database/migrations/005_members_and_flat_assignments.sql
+@@ -0,0 +1,66 @@
++CREATE TABLE IF NOT EXISTS members (
++  id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
++  society_id BIGINT UNSIGNED NOT NULL,
++  user_id BIGINT UNSIGNED NULL,
++  member_code VARCHAR(50) NOT NULL,
++  name VARCHAR(150) NOT NULL,
++  mobile VARCHAR(20) NOT NULL,
++  email VARCHAR(150) NULL,
++  status ENUM('ACTIVE','INACTIVE') NOT NULL DEFAULT 'ACTIVE',
++  created_by BIGINT UNSIGNED NULL,
++  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
++  updated_by BIGINT UNSIGNED NULL,
++  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
++  deleted_at TIMESTAMP NULL,
++  UNIQUE KEY uk_members_society_code (society_id, member_code),
++  UNIQUE KEY uk_members_society_mobile (society_id, mobile),
++  KEY idx_members_society_status (society_id, status, deleted_at),
++  CONSTRAINT fk_members_society FOREIGN KEY (society_id) REFERENCES societies(id) ON DELETE RESTRICT ON UPDATE CASCADE,
++  CONSTRAINT fk_members_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL ON UPDATE CASCADE
++) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
++
++CREATE TABLE IF NOT EXISTS flat_members (
++  id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
++  society_id BIGINT UNSIGNED NOT NULL,
++  flat_id BIGINT UNSIGNED NOT NULL,
++  member_id BIGINT UNSIGNED NOT NULL,
++  member_type ENUM('OWNER','CO_OWNER','TENANT') NOT NULL,
++  ownership_percentage DECIMAL(5,2) NULL,
++  occupancy_start DATE NULL,
++  occupancy_end DATE NULL,
++  agreement_status ENUM('NOT_REQUIRED','PENDING','VERIFIED','EXPIRED') NOT NULL DEFAULT 'NOT_REQUIRED',
++  police_noc_status ENUM('NOT_REQUIRED','PENDING','VERIFIED') NOT NULL DEFAULT 'NOT_REQUIRED',
++  is_primary BOOLEAN NOT NULL DEFAULT FALSE,
++  status ENUM('ACTIVE','INACTIVE') NOT NULL DEFAULT 'ACTIVE',
++  created_by BIGINT UNSIGNED NULL,
++  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
++  updated_by BIGINT UNSIGNED NULL,
++  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
++  ended_at TIMESTAMP NULL,
++  UNIQUE KEY uk_flat_member_type (society_id, flat_id, member_id, member_type),
++  KEY idx_flat_members_society_type (society_id, member_type, status),
++  KEY idx_flat_members_flat (society_id, flat_id, status),
++  CONSTRAINT fk_flat_members_society FOREIGN KEY (society_id) REFERENCES societies(id) ON DELETE RESTRICT ON UPDATE CASCADE,
++  CONSTRAINT fk_flat_members_flat FOREIGN KEY (flat_id) REFERENCES flats(id) ON DELETE RESTRICT ON UPDATE CASCADE,
++  CONSTRAINT fk_flat_members_member FOREIGN KEY (member_id) REFERENCES members(id) ON DELETE RESTRICT ON UPDATE CASCADE
++) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
++
++INSERT INTO permissions (permission_name, permission_code, module_name, description, status)
++VALUES
++  ('View Members', 'society.members.view', 'members', 'View society members and flat assignments', 'ACTIVE'),
++  ('Create Members', 'society.members.create', 'members', 'Create members and flat assignments', 'ACTIVE'),
++  ('Update Members', 'society.members.update', 'members', 'Update members and flat assignments', 'ACTIVE'),
++  ('Remove Members', 'society.members.delete', 'members', 'Deactivate flat member assignments', 'ACTIVE')
++ON DUPLICATE KEY UPDATE status = 'ACTIVE';
++
++INSERT INTO role_permissions (role_id, permission_id)
++SELECT r.id, p.id FROM roles r CROSS JOIN permissions p
++WHERE r.role_code IN ('SUPER_ADMIN','SOCIETY_ADMIN','CHAIRMAN','SECRETARY')
++  AND p.permission_code LIKE 'society.members.%'
++ON DUPLICATE KEY UPDATE permission_id = VALUES(permission_id);
++
++INSERT INTO role_permissions (role_id, permission_id)
++SELECT r.id, p.id FROM roles r CROSS JOIN permissions p
++WHERE r.role_code IN ('TREASURER','ACCOUNTANT','SECURITY','RESIDENT')
++  AND p.permission_code = 'society.members.view'
++ON DUPLICATE KEY UPDATE permission_id = VALUES(permission_id);
+diff --git a/backend/src/controllers/member.controller.js b/backend/src/controllers/member.controller.js
+new file mode 100644
+index 0000000..9c3b2a8
+--- /dev/null
++++ b/backend/src/controllers/member.controller.js
+@@ -0,0 +1,11 @@
++import memberService from '../services/member.service.js';
++import { asyncHandler } from '../utils/async-handler.js';
++import { sendSuccess } from '../utils/api-response.js';
++
++const requestMeta = (req) => ({ ipAddress: req.ip, userAgent: req.get('user-agent') });
++export const listMembers = asyncHandler(async (req, res) => sendSuccess(res, 200, 'Members fetched successfully', await memberService.list(req.auth.activeSocietyId, req.query.type)));
++export const createMember = asyncHandler(async (req, res) => sendSuccess(res, 201, 'Member assigned to flat successfully', await memberService.create(req.auth.activeSocietyId, req.body, req.auth.userId, requestMeta(req))));
++export const removeMember = asyncHandler(async (req, res) => {
++  await memberService.remove(req.auth.activeSocietyId, Number(req.params.id), req.auth.userId, requestMeta(req));
++  return sendSuccess(res, 200, 'Member assignment removed successfully');
++});
+diff --git a/backend/src/repositories/member.repository.js b/backend/src/repositories/member.repository.js
+new file mode 100644
+index 0000000..8c978ab
+--- /dev/null
++++ b/backend/src/repositories/member.repository.js
+@@ -0,0 +1,126 @@
++import { getPool } from '../config/database.js';
++
++const SELECT_MEMBERS = `
++  SELECT fm.id, m.id AS member_id, m.member_code, m.name, m.mobile, m.email,
++         fm.flat_id, fl.flat_no, b.building_name, w.wing_name,
++         fm.member_type, fm.ownership_percentage, fm.occupancy_start, fm.occupancy_end,
++         fm.agreement_status, fm.police_noc_status, fm.is_primary, fm.status
++  FROM flat_members fm
++  INNER JOIN members m ON m.id = fm.member_id AND m.society_id = fm.society_id AND m.deleted_at IS NULL
++  INNER JOIN flats fl ON fl.id = fm.flat_id AND fl.society_id = fm.society_id AND fl.deleted_at IS NULL
++  INNER JOIN buildings b ON b.id = fl.building_id AND b.society_id = fm.society_id AND b.deleted_at IS NULL
++  INNER JOIN building_wings w ON w.id = fl.wing_id AND w.building_id = fl.building_id AND w.deleted_at IS NULL`;
++
++class MemberRepository {
++  async list(societyId, memberType = null) {
++    const params = [societyId];
++    let filter = '';
++    if (memberType) { filter = ' AND fm.member_type = ?'; params.push(memberType); }
++    const [rows] = await getPool().execute(
++      `${SELECT_MEMBERS} WHERE fm.society_id = ?${filter}
++       ORDER BY fm.status = 'ACTIVE' DESC, b.building_name, w.wing_name, fl.flat_no, m.name`, params
++    );
++    return rows;
++  }
++
++  async getById(societyId, assignmentId) {
++    const [rows] = await getPool().execute(
++      `${SELECT_MEMBERS} WHERE fm.society_id = ? AND fm.id = ? LIMIT 1`, [societyId, assignmentId]
++    );
++    return rows[0] || null;
++  }
++
++  async getActiveFlat(societyId, flatId) {
++    const [rows] = await getPool().execute(
++      `SELECT id FROM flats WHERE id = ? AND society_id = ? AND status = 'ACTIVE' AND deleted_at IS NULL LIMIT 1`,
++      [flatId, societyId]
++    );
++    return rows[0] || null;
++  }
++
++  async findMemberByMobile(societyId, mobile) {
++    const [rows] = await getPool().execute(
++      `SELECT id, name, mobile, email, status, deleted_at FROM members WHERE society_id = ? AND mobile = ? LIMIT 1`,
++      [societyId, mobile]
++    );
++    return rows[0] || null;
++  }
++
++  async createAssignment(societyId, payload, userId) {
++    const connection = await getPool().getConnection();
++    try {
++      await connection.beginTransaction();
++      let [members] = await connection.execute(
++        `SELECT id FROM members WHERE society_id = ? AND mobile = ? FOR UPDATE`, [societyId, payload.mobile]
++      );
++      let memberId = members[0]?.id;
++      if (!memberId) {
++        const [result] = await connection.execute(
++          `INSERT INTO members (society_id, member_code, name, mobile, email, status, created_by, updated_by)
++           VALUES (?, CONCAT('MEM', UUID_SHORT()), ?, ?, ?, 'ACTIVE', ?, ?)`,
++          [societyId, payload.name, payload.mobile, payload.email, userId, userId]
++        );
++        memberId = result.insertId;
++      }
++      const [existing] = await connection.execute(
++        `SELECT id FROM flat_members WHERE society_id = ? AND flat_id = ? AND member_id = ? AND member_type = ? LIMIT 1`,
++        [societyId, payload.flat_id, memberId, payload.member_type]
++      );
++      if (existing[0]) throw Object.assign(new Error('Member is already assigned to this flat with the selected type'), { code: 'DUPLICATE_ASSIGNMENT' });
++      const [result] = await connection.execute(
++        `INSERT INTO flat_members
++          (society_id, flat_id, member_id, member_type, ownership_percentage, occupancy_start, occupancy_end,
++           agreement_status, police_noc_status, is_primary, status, created_by, updated_by)
++         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE', ?, ?)`,
++        [societyId, payload.flat_id, memberId, payload.member_type, payload.ownership_percentage,
++          payload.occupancy_start, payload.occupancy_end, payload.agreement_status, payload.police_noc_status,
++          payload.is_primary, userId, userId]
++      );
++      const occupancy = payload.member_type === 'TENANT' ? 'RENTED' : 'OWNER_OCCUPIED';
++      await connection.execute(
++        `UPDATE flats SET occupancy_status = ?, updated_by = ? WHERE id = ? AND society_id = ?`,
++        [occupancy, userId, payload.flat_id, societyId]
++      );
++      await connection.execute(
++        `UPDATE societies SET total_members = (
++           SELECT COUNT(DISTINCT fm.member_id) FROM flat_members fm WHERE fm.society_id = ? AND fm.status = 'ACTIVE'
++         ) WHERE id = ?`, [societyId, societyId]
++      );
++      await connection.commit();
++      return result.insertId;
++    } catch (error) { await connection.rollback(); throw error; }
++    finally { connection.release(); }
++  }
++
++  async deactivate(societyId, assignmentId, userId) {
++    const connection = await getPool().getConnection();
++    try {
++      await connection.beginTransaction();
++      const [currentRows] = await connection.execute(
++        `SELECT flat_id FROM flat_members WHERE id = ? AND society_id = ? AND status = 'ACTIVE' FOR UPDATE`,
++        [assignmentId, societyId]
++      );
++      if (!currentRows[0]) { await connection.rollback(); return false; }
++      const flatId = currentRows[0].flat_id;
++      await connection.execute(
++        `UPDATE flat_members SET status = 'INACTIVE', ended_at = UTC_TIMESTAMP(), updated_by = ? WHERE id = ? AND society_id = ?`,
++        [userId, assignmentId, societyId]
++      );
++      const [types] = await connection.execute(
++        `SELECT member_type FROM flat_members WHERE society_id = ? AND flat_id = ? AND status = 'ACTIVE'`,
++        [societyId, flatId]
++      );
++      const occupancy = types.some((row) => row.member_type === 'TENANT') ? 'RENTED'
++        : types.some((row) => row.member_type === 'OWNER' || row.member_type === 'CO_OWNER') ? 'OWNER_OCCUPIED' : 'VACANT';
++      await connection.execute(`UPDATE flats SET occupancy_status = ?, updated_by = ? WHERE id = ? AND society_id = ?`, [occupancy, userId, flatId, societyId]);
++      await connection.execute(
++        `UPDATE societies SET total_members = (SELECT COUNT(DISTINCT member_id) FROM flat_members WHERE society_id = ? AND status = 'ACTIVE') WHERE id = ?`,
++        [societyId, societyId]
++      );
++      await connection.commit(); return true;
++    } catch (error) { await connection.rollback(); throw error; }
++    finally { connection.release(); }
++  }
++}
++
++export default new MemberRepository();
+diff --git a/backend/src/routes/index.js b/backend/src/routes/index.js
+index d43df21..82f361f 100644
+--- a/backend/src/routes/index.js
++++ b/backend/src/routes/index.js
+@@ -7,6 +7,7 @@ import buildingRoutes from './building.routes.js';
+ import floorRoutes from './floor.routes.js';
+ import flatRoutes from './flat.routes.js';
+ import societyUserRoutes from './society-user.routes.js';
++import memberRoutes from './member.routes.js';
+ 
+ const router = express.Router();
+ 
+@@ -20,6 +21,7 @@ router.use('/society/buildings', buildingRoutes);
+ router.use('/society/floors', floorRoutes);
+ router.use('/society/flats', flatRoutes);
+ router.use('/society/users', societyUserRoutes);
++router.use('/society/members', memberRoutes);
+ router.use('/society', societyProfileRoutes);
+ 
+ export default router;
+diff --git a/backend/src/routes/member.routes.js b/backend/src/routes/member.routes.js
+new file mode 100644
+index 0000000..ea51634
+--- /dev/null
++++ b/backend/src/routes/member.routes.js
+@@ -0,0 +1,14 @@
++import express from 'express';
++import { createMember, listMembers, removeMember } from '../controllers/member.controller.js';
++import { authenticate } from '../middleware/authenticate.middleware.js';
++import { authorizePermissions, requireActiveSociety } from '../middleware/authorize.middleware.js';
++import { handleValidationErrors } from '../validators/auth.validators.js';
++import { validateCreateMember, validateMemberFilter, validateMemberId } from '../validators/member.validators.js';
++
++const router = express.Router();
++router.use(authenticate, requireActiveSociety);
++router.get('/', authorizePermissions('society.members.view'), validateMemberFilter, handleValidationErrors, listMembers);
++router.post('/', authorizePermissions('society.members.create'), validateCreateMember, handleValidationErrors, createMember);
++router.delete('/:id', authorizePermissions('society.members.delete'), validateMemberId, handleValidationErrors, removeMember);
++
++export default router;
+diff --git a/backend/src/services/member.service.js b/backend/src/services/member.service.js
+new file mode 100644
+index 0000000..504ba32
+--- /dev/null
++++ b/backend/src/services/member.service.js
+@@ -0,0 +1,64 @@
++import memberRepository from '../repositories/member.repository.js';
++import auditRepository from '../repositories/audit.repository.js';
++import { normalizeEmail, normalizeMobile } from '../utils/normalize.js';
++import { ApiError } from '../utils/api-error.js';
++
++const allowedTypes = ['OWNER', 'CO_OWNER', 'TENANT'];
++
++class MemberService {
++  list(societyId, memberType) {
++    const normalizedType = memberType ? String(memberType).toUpperCase() : null;
++    if (normalizedType && !allowedTypes.includes(normalizedType)) throw new ApiError(400, 'Invalid member type');
++    return memberRepository.list(societyId, normalizedType);
++  }
++
++  async create(societyId, payload, userId, requestMeta) {
++    if (!await memberRepository.getActiveFlat(societyId, payload.flat_id)) {
++      throw new ApiError(404, 'Selected flat was not found in the selected society');
++    }
++    const mobile = normalizeMobile(payload.mobile);
++    const existing = await memberRepository.findMemberByMobile(societyId, mobile);
++    if (existing?.deleted_at || (existing && existing.status !== 'ACTIVE')) {
++      throw new ApiError(409, 'This mobile belongs to an inactive member record');
++    }
++    const memberType = payload.member_type.toUpperCase();
++    if (memberType === 'TENANT' && payload.occupancy_start && payload.occupancy_end
++      && new Date(payload.occupancy_end) < new Date(payload.occupancy_start)) {
++      throw new ApiError(400, 'Tenant end date must be after the start date');
++    }
++    const normalized = {
++      name: payload.name.trim(), mobile, email: payload.email ? normalizeEmail(payload.email) : null,
++      flat_id: payload.flat_id, member_type: memberType,
++      ownership_percentage: memberType === 'TENANT' ? null : (payload.ownership_percentage || null),
++      occupancy_start: payload.occupancy_start || null, occupancy_end: payload.occupancy_end || null,
++      agreement_status: memberType === 'TENANT' ? payload.agreement_status : 'NOT_REQUIRED',
++      police_noc_status: memberType === 'TENANT' ? payload.police_noc_status : 'NOT_REQUIRED',
++      is_primary: Boolean(payload.is_primary),
++    };
++    let assignmentId;
++    try { assignmentId = await memberRepository.createAssignment(societyId, normalized, userId); }
++    catch (error) {
++      if (error.code === 'DUPLICATE_ASSIGNMENT') throw new ApiError(409, error.message);
++      throw error;
++    }
++    const member = await memberRepository.getById(societyId, assignmentId);
++    await auditRepository.log({
++      societyId, userId, moduleName: 'members', action: 'create_assignment', recordId: assignmentId,
++      newData: member, ipAddress: requestMeta.ipAddress, userAgent: requestMeta.userAgent,
++    });
++    return member;
++  }
++
++  async remove(societyId, assignmentId, userId, requestMeta) {
++    const current = await memberRepository.getById(societyId, assignmentId);
++    if (!current) throw new ApiError(404, 'Member assignment not found in the selected society');
++    if (current.status !== 'ACTIVE') throw new ApiError(409, 'Member assignment is already inactive');
++    await memberRepository.deactivate(societyId, assignmentId, userId);
++    await auditRepository.log({
++      societyId, userId, moduleName: 'members', action: 'remove_assignment', recordId: assignmentId,
++      oldData: current, ipAddress: requestMeta.ipAddress, userAgent: requestMeta.userAgent,
++    });
++  }
++}
++
++export default new MemberService();
+diff --git a/backend/src/validators/member.validators.js b/backend/src/validators/member.validators.js
+new file mode 100644
+index 0000000..3cc30f5
+--- /dev/null
++++ b/backend/src/validators/member.validators.js
+@@ -0,0 +1,17 @@
++import { body, param, query } from 'express-validator';
++
++export const validateMemberFilter = [query('type').optional().isIn(['OWNER','CO_OWNER','TENANT']).withMessage('Invalid member type')];
++export const validateMemberId = [param('id').isInt({ min: 1 }).withMessage('Member assignment ID must be a positive integer')];
++export const validateCreateMember = [
++  body('name').trim().notEmpty().withMessage('Full name is required').isLength({ max: 150 }),
++  body('mobile').trim().notEmpty().withMessage('Mobile number is required').isLength({ min: 10, max: 20 }),
++  body('email').optional({ checkFalsy: true }).trim().isEmail().withMessage('Enter a valid email address').isLength({ max: 150 }),
++  body('flat_id').isInt({ min: 1 }).withMessage('Flat is required'),
++  body('member_type').isIn(['OWNER','CO_OWNER','TENANT']).withMessage('Member type is invalid'),
++  body('ownership_percentage').optional({ checkFalsy: true }).isFloat({ min: 0.01, max: 100 }).withMessage('Ownership percentage must be between 0.01 and 100'),
++  body('occupancy_start').optional({ checkFalsy: true }).isISO8601().withMessage('Start date is invalid'),
++  body('occupancy_end').optional({ checkFalsy: true }).isISO8601().withMessage('End date is invalid'),
++  body('agreement_status').isIn(['NOT_REQUIRED','PENDING','VERIFIED','EXPIRED']).withMessage('Agreement status is invalid'),
++  body('police_noc_status').isIn(['NOT_REQUIRED','PENDING','VERIFIED']).withMessage('Police NOC status is invalid'),
++  body('is_primary').optional().isBoolean().withMessage('Primary member value is invalid'),
++];
+diff --git a/src/app/(app)/members/co-owners/page.tsx b/src/app/(app)/members/co-owners/page.tsx
+index b381b7f..47a7b2d 100644
+--- a/src/app/(app)/members/co-owners/page.tsx
++++ b/src/app/(app)/members/co-owners/page.tsx
+@@ -1,11 +1,5 @@
+-import { PageHeader } from "@/components/layout/PageHeader";
+-import { MembersByType } from "@/components/modules/MembersByType";
++import { SocietyMembers } from "@/components/modules/SocietyMembers";
+ 
+ export default function CoOwnersPage() {
+-  return (
+-    <div>
+-      <PageHeader title="Co-Owners" description="Joint / co-owners registered against flats" />
+-      <MembersByType type="Co-Owner" />
+-    </div>
+-  );
++  return <SocietyMembers type="CO_OWNER" title="Co-Owners" />;
+ }
+diff --git a/src/app/(app)/members/owners/page.tsx b/src/app/(app)/members/owners/page.tsx
+index 7c10977..0b63f6b 100644
+--- a/src/app/(app)/members/owners/page.tsx
++++ b/src/app/(app)/members/owners/page.tsx
+@@ -1,11 +1,5 @@
+-import { PageHeader } from "@/components/layout/PageHeader";
+-import { MembersByType } from "@/components/modules/MembersByType";
++import { SocietyMembers } from "@/components/modules/SocietyMembers";
+ 
+ export default function OwnersPage() {
+-  return (
+-    <div>
+-      <PageHeader title="Owners" description="All registered flat owners in the society" />
+-      <MembersByType type="Owner" />
+-    </div>
+-  );
++  return <SocietyMembers type="OWNER" title="Owners" />;
+ }
+diff --git a/src/app/(app)/members/page.tsx b/src/app/(app)/members/page.tsx
+index 0de294a..4cc8d04 100644
+--- a/src/app/(app)/members/page.tsx
++++ b/src/app/(app)/members/page.tsx
+@@ -1,87 +1,2 @@
+-"use client";
+-
+-import { useState } from "react";
+-import { Plus, Eye, Pencil, Trash2 } from "lucide-react";
+-import { PageHeader } from "@/components/layout/PageHeader";
+-import { Card } from "@/components/ui/Card";
+-import { Button } from "@/components/ui/Button";
+-import { DataTable, Column } from "@/components/ui/DataTable";
+-import { StatusBadge, Badge } from "@/components/ui/Badge";
+-import { Drawer } from "@/components/ui/Drawer";
+-import { Input, Select } from "@/components/ui/Input";
+-import { members } from "@/lib/mock-data";
+-import { Member } from "@/types";
+-import { initials } from "@/lib/utils";
+-
+-export default function AllMembersPage() {
+-  const [drawerOpen, setDrawerOpen] = useState(false);
+-
+-  const columns: Column<Member>[] = [
+-    {
+-      key: "name",
+-      header: "Member",
+-      render: (m) => (
+-        <span className="flex items-center gap-2.5">
+-          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[var(--color-primary)]/10 text-xs font-semibold text-[var(--color-primary)]">
+-            {initials(m.name)}
+-          </span>
+-          <span>
+-            <span className="block font-medium text-[var(--color-text)]">{m.name}</span>
+-            <span className="block text-xs text-[var(--color-text-secondary)]">{m.email}</span>
+-          </span>
+-        </span>
+-      ),
+-    },
+-    { key: "flatNo", header: "Flat No." },
+-    { key: "building", header: "Building" },
+-    { key: "mobile", header: "Mobile" },
+-    { key: "type", header: "Type", render: (m) => <Badge>{m.type}</Badge> },
+-    { key: "status", header: "Status", render: (m) => <StatusBadge status={m.status} /> },
+-  ];
+-
+-  return (
+-    <div>
+-      <PageHeader
+-        title="All Members"
+-        description={`${members.length} members across the society`}
+-        actions={<Button onClick={() => setDrawerOpen(true)}><Plus className="h-4 w-4" /> Add Member</Button>}
+-      />
+-
+-      <Card>
+-        <DataTable
+-          columns={columns}
+-          data={members}
+-          keyField="id"
+-          searchPlaceholder="Search members by name, flat, mobile..."
+-          filters={[
+-            { key: "type", label: "Member Type", options: ["Owner", "Co-Owner", "Tenant", "Family Member"] },
+-            { key: "status", label: "Status", options: ["Active", "Inactive"] },
+-          ]}
+-          rowActions={[
+-            { label: "View Profile", icon: <Eye className="h-4 w-4" />, onClick: () => {} },
+-            { label: "Edit", icon: <Pencil className="h-4 w-4" />, onClick: () => setDrawerOpen(true) },
+-            { label: "Remove", icon: <Trash2 className="h-4 w-4" />, onClick: () => {}, danger: true },
+-          ]}
+-          bulkActions={[{ label: "Export Selected", onClick: () => {} }]}
+-          onExport={() => {}}
+-          onImport={() => {}}
+-        />
+-      </Card>
+-
+-      <Drawer
+-        open={drawerOpen}
+-        onClose={() => setDrawerOpen(false)}
+-        title="Add Member"
+-        footer={<><Button variant="outline" onClick={() => setDrawerOpen(false)}>Cancel</Button><Button onClick={() => setDrawerOpen(false)}>Save Member</Button></>}
+-      >
+-        <div className="flex flex-col gap-4">
+-          <Input label="Full Name" required />
+-          <Input label="Mobile Number" required />
+-          <Input label="Email Address" type="email" />
+-          <Select label="Flat No." options={[{ label: "A-1203", value: "A-1203" }]} required />
+-          <Select label="Member Type" options={["Owner", "Co-Owner", "Tenant", "Family Member"].map((t) => ({ label: t, value: t }))} required />
+-        </div>
+-      </Drawer>
+-    </div>
+-  );
+-}
++import { SocietyMembers } from "@/components/modules/SocietyMembers";
++export default function AllMembersPage() { return <SocietyMembers />; }
+diff --git a/src/app/(app)/members/tenants/page.tsx b/src/app/(app)/members/tenants/page.tsx
+index c01d2ab..f2bed02 100644
+--- a/src/app/(app)/members/tenants/page.tsx
++++ b/src/app/(app)/members/tenants/page.tsx
+@@ -1,107 +1,2 @@
+-"use client";
+-
+-import { useState } from "react";
+-import Link from "next/link";
+-import { Plus, Eye, Pencil, Trash2, AlertTriangle } from "lucide-react";
+-import { PageHeader } from "@/components/layout/PageHeader";
+-import { Card, CardBody } from "@/components/ui/Card";
+-import { Button } from "@/components/ui/Button";
+-import { DataTable, Column } from "@/components/ui/DataTable";
+-import { StatusBadge } from "@/components/ui/Badge";
+-import { tenants } from "@/lib/mock-data";
+-import { Tenant } from "@/types";
+-import { formatDate, daysUntil, initials } from "@/lib/utils";
+-
+-export default function TenantsPage() {
+-  const [showForm, setShowForm] = useState(false);
+-
+-  const expiringSoon = tenants.filter((t) => daysUntil(t.rentEnd) > 0 && daysUntil(t.rentEnd) < 30);
+-  const pendingDocs = tenants.filter((t) => t.policeNoc === "Pending" || t.agreementStatus === "Pending");
+-
+-  const columns: Column<Tenant>[] = [
+-    {
+-      key: "name",
+-      header: "Tenant Name",
+-      render: (t) => (
+-        <span className="flex items-center gap-2.5">
+-          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[var(--color-primary)]/10 text-xs font-semibold text-[var(--color-primary)]">
+-            {initials(t.name)}
+-          </span>
+-          <span className="font-medium text-[var(--color-text)]">{t.name}</span>
+-        </span>
+-      ),
+-    },
+-    { key: "flatNo", header: "Flat" },
+-    { key: "building", header: "Building" },
+-    { key: "mobile", header: "Mobile" },
+-    { key: "rentStart", header: "Rent Start", render: (t) => formatDate(t.rentStart), sortAccessor: (t) => t.rentStart },
+-    { key: "rentEnd", header: "Rent End", render: (t) => formatDate(t.rentEnd), sortAccessor: (t) => t.rentEnd },
+-    { key: "brokerName", header: "Broker", render: (t) => t.brokerName ?? "—", hideByDefault: true },
+-    { key: "agreementStatus", header: "Agreement", render: (t) => <StatusBadge status={t.agreementStatus} /> },
+-    { key: "policeNoc", header: "Police NOC", render: (t) => <StatusBadge status={t.policeNoc} /> },
+-    { key: "status", header: "Status", render: (t) => <StatusBadge status={t.status} /> },
+-  ];
+-
+-  return (
+-    <div>
+-      <PageHeader
+-        title="Tenants"
+-        description={`${tenants.length} tenants currently residing in the society`}
+-        actions={
+-          <Link href="/members/tenants/new">
+-            <Button>
+-              <Plus className="h-4 w-4" /> Add Tenant
+-            </Button>
+-          </Link>
+-        }
+-      />
+-
+-      {(expiringSoon.length > 0 || pendingDocs.length > 0) && (
+-        <div className="mb-5 grid grid-cols-1 gap-3 sm:grid-cols-2">
+-          {expiringSoon.length > 0 && (
+-            <Card className="border-[var(--color-warning)]/30 bg-[var(--color-warning-bg)]">
+-              <CardBody className="flex items-start gap-3 py-3.5">
+-                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-[var(--color-warning)]" />
+-                <p className="text-sm text-[var(--color-text)]">
+-                  <strong>{expiringSoon.length} agreement(s)</strong> expiring within 30 days.
+-                </p>
+-              </CardBody>
+-            </Card>
+-          )}
+-          {pendingDocs.length > 0 && (
+-            <Card className="border-[var(--color-danger)]/30 bg-[var(--color-danger-bg)]">
+-              <CardBody className="flex items-start gap-3 py-3.5">
+-                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-[var(--color-danger)]" />
+-                <p className="text-sm text-[var(--color-text)]">
+-                  <strong>{pendingDocs.length} tenant(s)</strong> have pending document verification.
+-                </p>
+-              </CardBody>
+-            </Card>
+-          )}
+-        </div>
+-      )}
+-
+-      <Card>
+-        <DataTable
+-          columns={columns}
+-          data={tenants}
+-          keyField="id"
+-          searchPlaceholder="Search tenants by name, flat, mobile..."
+-          filters={[
+-            { key: "agreementStatus", label: "Agreement Status", options: ["Verified", "Pending", "Expired"] },
+-            { key: "policeNoc", label: "Police NOC", options: ["Verified", "Pending"] },
+-            { key: "building", label: "Building", options: Array.from(new Set(tenants.map((t) => t.building))) },
+-          ]}
+-          rowActions={[
+-            { label: "View Profile", icon: <Eye className="h-4 w-4" />, onClick: () => setShowForm(true) },
+-            { label: "Edit", icon: <Pencil className="h-4 w-4" />, onClick: () => setShowForm(true) },
+-            { label: "Remove Tenant", icon: <Trash2 className="h-4 w-4" />, onClick: () => {}, danger: true },
+-          ]}
+-          bulkActions={[{ label: "Send Reminder", onClick: () => {} }, { label: "Export Selected", onClick: () => {} }]}
+-          onExport={() => {}}
+-          onImport={() => {}}
+-        />
+-      </Card>
+-    </div>
+-  );
+-}
++import { SocietyMembers } from "@/components/modules/SocietyMembers";
++export default function TenantsPage() { return <SocietyMembers type="TENANT" title="Tenants" />; }
+diff --git a/src/components/modules/SocietyMembers.tsx b/src/components/modules/SocietyMembers.tsx
+new file mode 100644
+index 0000000..7601c08
+--- /dev/null
++++ b/src/components/modules/SocietyMembers.tsx
+@@ -0,0 +1,80 @@
++"use client";
++
++import { FormEvent, useCallback, useEffect, useState } from "react";
++import { Plus, Trash2 } from "lucide-react";
++import { PageHeader } from "@/components/layout/PageHeader";
++import { Card } from "@/components/ui/Card";
++import { Button } from "@/components/ui/Button";
++import { Badge, StatusBadge } from "@/components/ui/Badge";
++import { Column, DataTable } from "@/components/ui/DataTable";
++import { Drawer } from "@/components/ui/Drawer";
++import { Checkbox, Input, Select } from "@/components/ui/Input";
++import { formatDate, initials } from "@/lib/utils";
++import { getSocietySession } from "@/lib/session";
++
++const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:5000/api/v1";
++export type MemberType = "OWNER" | "CO_OWNER" | "TENANT";
++type FlatOption = { id: number; flat_no: string; building_name: string; wing_name: string };
++type MemberRow = { id: number; member_code: string; name: string; mobile: string; email: string | null; flat_id: number; flat_no: string; building_name: string; wing_name: string; member_type: MemberType; ownership_percentage: number | null; occupancy_start: string | null; occupancy_end: string | null; agreement_status: string; police_noc_status: string; is_primary: boolean; status: "ACTIVE" | "INACTIVE" };
++const labels: Record<MemberType, string> = { OWNER: "Owner", CO_OWNER: "Co-Owner", TENANT: "Tenant" };
++
++export function SocietyMembers({ type, title = "All Members" }: { type?: MemberType; title?: string }) {
++  const [rows, setRows] = useState<MemberRow[]>([]); const [flats, setFlats] = useState<FlatOption[]>([]);
++  const [drawerOpen, setDrawerOpen] = useState(false); const [loading, setLoading] = useState(true); const [saving, setSaving] = useState(false);
++  const [error, setError] = useState(""); const [success, setSuccess] = useState("");
++  const [form, setForm] = useState({ name: "", mobile: "", email: "", flat_id: "", member_type: type ?? "OWNER" as MemberType, ownership_percentage: "100", occupancy_start: "", occupancy_end: "", agreement_status: "NOT_REQUIRED", police_noc_status: "NOT_REQUIRED", is_primary: true });
++
++  const loadData = useCallback(async () => {
++    const session = getSocietySession();
++    if (!session?.accessToken || !session.activeSociety) { setError("Please select a society first."); setLoading(false); return; }
++    try {
++      const headers = { Authorization: `Bearer ${session.accessToken}` }; const query = type ? `?type=${type}` : "";
++      const [membersResponse, flatsResponse] = await Promise.all([fetch(`${API_URL}/society/members${query}`, { headers }), fetch(`${API_URL}/society/flats`, { headers })]);
++      const [membersResult, flatsResult] = await Promise.all([membersResponse.json(), flatsResponse.json()]);
++      if (!membersResponse.ok || !membersResult.success) throw new Error(membersResult.message || "Unable to load members.");
++      if (!flatsResponse.ok || !flatsResult.success) throw new Error(flatsResult.message || "Unable to load flats.");
++      setRows(membersResult.data ?? []); setFlats(flatsResult.data ?? []);
++    } catch (loadError) { setError(loadError instanceof Error ? loadError.message : "Unable to load members."); }
++    finally { setLoading(false); }
++  }, [type]);
++  useEffect(() => { void loadData(); }, [loadData]);
++
++  const openCreate = () => { const memberType = type ?? "OWNER"; setForm({ name: "", mobile: "", email: "", flat_id: "", member_type: memberType, ownership_percentage: memberType === "TENANT" ? "" : "100", occupancy_start: "", occupancy_end: "", agreement_status: memberType === "TENANT" ? "PENDING" : "NOT_REQUIRED", police_noc_status: memberType === "TENANT" ? "PENDING" : "NOT_REQUIRED", is_primary: memberType === "OWNER" }); setError(""); setSuccess(""); setDrawerOpen(true); };
++  async function submit(event: FormEvent) {
++    event.preventDefault(); const session = getSocietySession(); if (!session?.accessToken) return setError("Your session is missing. Please login again.");
++    setSaving(true); setError("");
++    try {
++      const response = await fetch(`${API_URL}/society/members`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.accessToken}` }, body: JSON.stringify({ ...form, flat_id: Number(form.flat_id), ownership_percentage: form.ownership_percentage ? Number(form.ownership_percentage) : null }) });
++      const result = await response.json(); if (!response.ok || !result.success) throw new Error(Array.isArray(result.errors) ? result.errors.join(", ") : result.message || "Unable to add member.");
++      setDrawerOpen(false); setSuccess(`${labels[form.member_type]} assigned to flat successfully.`); await loadData();
++    } catch (saveError) { setError(saveError instanceof Error ? saveError.message : "Unable to add member."); } finally { setSaving(false); }
++  }
++  async function remove(row: MemberRow) {
++    if (!window.confirm(`Remove ${row.name}'s ${labels[row.member_type]} assignment from flat ${row.flat_no}?`)) return;
++    const session = getSocietySession(); if (!session?.accessToken) return setError("Your session is missing.");
++    try { const response = await fetch(`${API_URL}/society/members/${row.id}`, { method: "DELETE", headers: { Authorization: `Bearer ${session.accessToken}` } }); const result = await response.json(); if (!response.ok || !result.success) throw new Error(result.message || "Unable to remove member."); setSuccess("Member assignment removed successfully."); await loadData(); }
++    catch (removeError) { setError(removeError instanceof Error ? removeError.message : "Unable to remove member."); }
++  }
++  const columns: Column<MemberRow>[] = [
++    { key: "name", header: "Member", render: (row) => <span className="flex items-center gap-2.5"><span className="flex h-8 w-8 items-center justify-center rounded-full bg-[var(--color-primary)]/10 text-xs font-semibold text-[var(--color-primary)]">{initials(row.name)}</span><span><span className="block font-medium">{row.name}</span><span className="block text-xs text-[var(--color-text-secondary)]">{row.member_code}</span></span></span> },
++    { key: "flat_no", header: "Flat", render: (row) => `${row.wing_name}-${row.flat_no}` }, { key: "building_name", header: "Building" }, { key: "mobile", header: "Mobile" },
++    { key: "member_type", header: "Type", render: (row) => <Badge>{labels[row.member_type]}</Badge> }, { key: "ownership_percentage", header: "Ownership", render: (row) => row.ownership_percentage ? `${row.ownership_percentage}%` : "—" },
++    { key: "occupancy_end", header: "End Date", render: (row) => row.member_type === "TENANT" && row.occupancy_end ? formatDate(row.occupancy_end) : "—" }, { key: "status", header: "Status", render: (row) => <StatusBadge status={row.status === "ACTIVE" ? "Active" : "Inactive"} /> },
++  ];
++  const isTenant = form.member_type === "TENANT";
++  return <div>
++    <PageHeader title={title} description={`${rows.length} flat-member assignments in the selected society`} actions={<Button onClick={openCreate}><Plus className="h-4 w-4" /> Add {type ? labels[type] : "Member"}</Button>} />
++    {error && <p className="mb-4 rounded-[var(--radius-md)] bg-[var(--color-danger)]/10 px-4 py-3 text-sm text-[var(--color-danger)]">{error}</p>}{success && <p className="mb-4 rounded-[var(--radius-md)] bg-[var(--color-success-bg)] px-4 py-3 text-sm text-[var(--color-success)]">{success}</p>}
++    <Card><DataTable columns={columns} data={rows} keyField="id" searchFields={["name", "mobile", "flat_no", "building_name"]} searchPlaceholder={loading ? "Loading members..." : "Search members..."} filters={!type ? [{ key: "member_type", label: "Member Type", options: ["OWNER","CO_OWNER","TENANT"] }] : undefined} rowActions={[{ label: "Remove Assignment", icon: <Trash2 className="h-4 w-4" />, onClick: (row) => void remove(row), danger: true }]} /></Card>
++    <Drawer open={drawerOpen} onClose={() => !saving && setDrawerOpen(false)} title={`Add ${type ? labels[type] : "Member"}`} footer={<><Button variant="outline" onClick={() => setDrawerOpen(false)} disabled={saving}>Cancel</Button><Button type="submit" form="member-form" loading={saving}>Save Assignment</Button></>}>
++      <form id="member-form" onSubmit={submit} className="flex flex-col gap-4">
++        <Input label="Full Name" required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /><Input label="Mobile Number" required inputMode="tel" value={form.mobile} onChange={(e) => setForm({ ...form, mobile: e.target.value })} /><Input label="Email Address" type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
++        <Select label="Flat" required value={form.flat_id} onChange={(e) => setForm({ ...form, flat_id: e.target.value })} placeholder="Select flat" options={flats.map((flat) => ({ value: String(flat.id), label: `${flat.building_name} / ${flat.wing_name} / ${flat.flat_no}` }))} />
++        {!type && <Select label="Member Type" required value={form.member_type} onChange={(e) => { const member_type = e.target.value as MemberType; setForm({ ...form, member_type, ownership_percentage: member_type === "TENANT" ? "" : "100", agreement_status: member_type === "TENANT" ? "PENDING" : "NOT_REQUIRED", police_noc_status: member_type === "TENANT" ? "PENDING" : "NOT_REQUIRED" }); }} options={Object.entries(labels).map(([value, label]) => ({ value, label }))} />}
++        {!isTenant && <Input label="Ownership Percentage" type="number" min="0.01" max="100" step="0.01" value={form.ownership_percentage} onChange={(e) => setForm({ ...form, ownership_percentage: e.target.value })} />}
++        {isTenant && <><Input label="Agreement Start" type="date" value={form.occupancy_start} onChange={(e) => setForm({ ...form, occupancy_start: e.target.value })} /><Input label="Agreement End" type="date" value={form.occupancy_end} onChange={(e) => setForm({ ...form, occupancy_end: e.target.value })} /><Select label="Agreement Status" value={form.agreement_status} onChange={(e) => setForm({ ...form, agreement_status: e.target.value })} options={["PENDING","VERIFIED","EXPIRED"].map((value) => ({ value, label: value }))} /><Select label="Police NOC" value={form.police_noc_status} onChange={(e) => setForm({ ...form, police_noc_status: e.target.value })} options={["PENDING","VERIFIED"].map((value) => ({ value, label: value }))} /></>}
++        <Checkbox checked={form.is_primary} onChange={(is_primary) => setForm({ ...form, is_primary })} label="Primary member for this flat" />
++      </form>
++    </Drawer>
++  </div>;
++}
+-- 
+2.51.1
+
