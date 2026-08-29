@@ -1,0 +1,454 @@
+From c5489246575bbf77ddc576987b5ebc121160c4b4 Mon Sep 17 00:00:00 2001
+From: Codex <codex@openai.com>
+Date: Sat, 29 Aug 2026 15:14:38 +0000
+Subject: [PATCH] feat(society): connect profile form to tenant API
+
+---
+ .../controllers/society-profile.controller.js |  19 ++
+ .../src/repositories/society.repository.js    |  28 +++
+ backend/src/routes/index.js                   |   2 +
+ backend/src/routes/society-profile.routes.js  |  14 ++
+ .../src/services/society-profile.service.js   |  61 +++++
+ .../validators/society-profile.validators.js  |  16 ++
+ src/app/(app)/society/profile/page.tsx        | 217 ++++++++++++------
+ 7 files changed, 286 insertions(+), 71 deletions(-)
+ create mode 100644 backend/src/controllers/society-profile.controller.js
+ create mode 100644 backend/src/routes/society-profile.routes.js
+ create mode 100644 backend/src/services/society-profile.service.js
+ create mode 100644 backend/src/validators/society-profile.validators.js
+
+diff --git a/backend/src/controllers/society-profile.controller.js b/backend/src/controllers/society-profile.controller.js
+new file mode 100644
+index 0000000..70657a8
+--- /dev/null
++++ b/backend/src/controllers/society-profile.controller.js
+@@ -0,0 +1,19 @@
++import societyProfileService from '../services/society-profile.service.js';
++import { asyncHandler } from '../utils/async-handler.js';
++import { sendSuccess } from '../utils/api-response.js';
++
++export const getSocietyProfile = asyncHandler(async (req, res) => sendSuccess(
++  res, 200, 'Society profile fetched successfully',
++  await societyProfileService.get(req.auth.activeSocietyId)
++));
++
++export const updateSocietyProfile = asyncHandler(async (req, res) => sendSuccess(
++  res, 200, 'Society profile updated successfully',
++  await societyProfileService.update(
++    req.auth.activeSocietyId,
++    req.body,
++    req.auth.userId,
++    req.ip,
++    req.get('user-agent')
++  )
++));
+diff --git a/backend/src/repositories/society.repository.js b/backend/src/repositories/society.repository.js
+index 8ff12cd..004cfef 100644
+--- a/backend/src/repositories/society.repository.js
++++ b/backend/src/repositories/society.repository.js
+@@ -69,6 +69,34 @@ class SocietyRepository {
+     return rows[0] || null;
+   }
+ 
++  static async updateProfile(id, profile, updatedBy) {
++    const pool = getPool();
++    await pool.execute(
++      `UPDATE societies
++       SET society_name = ?, registration_no = ?, registration_type = ?,
++           address = ?, city = ?, state = ?, pincode = ?, pan_number = ?,
++           email = ?, mobile = ?, logo = ?, established_date = ?, updated_by = ?
++       WHERE id = ? AND deleted_at IS NULL`,
++      [
++        profile.society_name,
++        profile.registration_no || null,
++        profile.registration_type || 'Co-operative Housing Society',
++        profile.address || null,
++        profile.city || null,
++        profile.state || null,
++        profile.pincode || null,
++        profile.pan_number || null,
++        profile.email || null,
++        profile.mobile || null,
++        profile.logo || null,
++        profile.established_date || null,
++        updatedBy,
++        id,
++      ]
++    );
++    return this.getById(id);
++  }
++
+   static async getMemberCount(societyId) {
+     const pool = getPool();
+     const [rows] = await pool.execute(
+diff --git a/backend/src/routes/index.js b/backend/src/routes/index.js
+index d465a2a..c4fb6d5 100644
+--- a/backend/src/routes/index.js
++++ b/backend/src/routes/index.js
+@@ -2,6 +2,7 @@ import express from 'express';
+ import healthRoutes from './health.routes.js';
+ import authRoutes from './auth.routes.js';
+ import platformRoutes from './platform.routes.js';
++import societyProfileRoutes from './society-profile.routes.js';
+ 
+ const router = express.Router();
+ 
+@@ -11,5 +12,6 @@ router.use('/', healthRoutes);
+ // Authentication routes
+ router.use('/auth', authRoutes);
+ router.use('/platform', platformRoutes);
++router.use('/society', societyProfileRoutes);
+ 
+ export default router;
+diff --git a/backend/src/routes/society-profile.routes.js b/backend/src/routes/society-profile.routes.js
+new file mode 100644
+index 0000000..fc7b755
+--- /dev/null
++++ b/backend/src/routes/society-profile.routes.js
+@@ -0,0 +1,14 @@
++import express from 'express';
++import { getSocietyProfile, updateSocietyProfile } from '../controllers/society-profile.controller.js';
++import { authenticate } from '../middleware/authenticate.middleware.js';
++import { authorizePermissions, requireActiveSociety } from '../middleware/authorize.middleware.js';
++import { handleValidationErrors } from '../validators/auth.validators.js';
++import { validateSocietyProfile } from '../validators/society-profile.validators.js';
++
++const router = express.Router();
++
++router.use(authenticate, requireActiveSociety);
++router.get('/profile', authorizePermissions('society.profile.view'), getSocietyProfile);
++router.put('/profile', authorizePermissions('society.profile.update'), validateSocietyProfile, handleValidationErrors, updateSocietyProfile);
++
++export default router;
+diff --git a/backend/src/services/society-profile.service.js b/backend/src/services/society-profile.service.js
+new file mode 100644
+index 0000000..c07d3b1
+--- /dev/null
++++ b/backend/src/services/society-profile.service.js
+@@ -0,0 +1,61 @@
++import SocietyRepository from '../repositories/society.repository.js';
++import auditRepository from '../repositories/audit.repository.js';
++import { ApiError } from '../utils/api-error.js';
++import { normalizeEmail, normalizeMobile } from '../utils/normalize.js';
++
++const toSafeProfile = (society) => ({
++  id: society.id,
++  society_code: society.society_code,
++  society_name: society.society_name,
++  registration_no: society.registration_no,
++  registration_type: society.registration_type,
++  address: society.address,
++  city: society.city,
++  state: society.state,
++  pincode: society.pincode,
++  pan_number: society.pan_number,
++  email: society.email,
++  mobile: society.mobile,
++  logo: society.logo,
++  established_date: society.established_date,
++  buildings: society.buildings ?? 0,
++  flats: society.flats ?? 0,
++  total_members: society.total_members ?? 0,
++  status: society.status,
++});
++
++class SocietyProfileService {
++  async get(societyId) {
++    const society = await SocietyRepository.getById(societyId);
++    if (!society || society.status !== 'ACTIVE') throw new ApiError(404, 'Active society not found');
++    return toSafeProfile(society);
++  }
++
++  async update(societyId, payload, userId, ipAddress, userAgent) {
++    const current = await SocietyRepository.getById(societyId);
++    if (!current || current.status !== 'ACTIVE') throw new ApiError(404, 'Active society not found');
++
++    const updated = await SocietyRepository.updateProfile(societyId, {
++      ...payload,
++      society_name: payload.society_name.trim(),
++      email: payload.email ? normalizeEmail(payload.email) : null,
++      mobile: payload.mobile ? normalizeMobile(payload.mobile) : null,
++    }, userId);
++
++    const safeUpdated = toSafeProfile(updated);
++    await auditRepository.log({
++      societyId,
++      userId,
++      moduleName: 'society_profile',
++      action: 'update',
++      recordId: societyId,
++      oldData: toSafeProfile(current),
++      newData: safeUpdated,
++      ipAddress,
++      userAgent,
++    });
++    return safeUpdated;
++  }
++}
++
++export default new SocietyProfileService();
+diff --git a/backend/src/validators/society-profile.validators.js b/backend/src/validators/society-profile.validators.js
+new file mode 100644
+index 0000000..aa899e1
+--- /dev/null
++++ b/backend/src/validators/society-profile.validators.js
+@@ -0,0 +1,16 @@
++import { body } from 'express-validator';
++
++export const validateSocietyProfile = [
++  body('society_name').trim().notEmpty().withMessage('Society name is required').isLength({ max: 200 }),
++  body('registration_no').optional({ checkFalsy: true }).trim().isLength({ max: 100 }),
++  body('registration_type').optional({ checkFalsy: true }).trim().isLength({ max: 100 }),
++  body('address').optional({ checkFalsy: true }).trim().isLength({ max: 2000 }),
++  body('city').optional({ checkFalsy: true }).trim().isLength({ max: 100 }),
++  body('state').optional({ checkFalsy: true }).trim().isLength({ max: 100 }),
++  body('pincode').optional({ checkFalsy: true }).trim().matches(/^\d{6}$/).withMessage('Pincode must contain 6 digits'),
++  body('pan_number').optional({ checkFalsy: true }).trim().isLength({ max: 50 }),
++  body('email').optional({ checkFalsy: true }).trim().isEmail().withMessage('Enter a valid email address'),
++  body('mobile').optional({ checkFalsy: true }).trim().isLength({ min: 10, max: 20 }).withMessage('Enter a valid mobile number'),
++  body('logo').optional({ checkFalsy: true }).trim().isURL().withMessage('Logo must be a valid URL').isLength({ max: 500 }),
++  body('established_date').optional({ checkFalsy: true }).isISO8601().withMessage('Established date must be valid'),
++];
+diff --git a/src/app/(app)/society/profile/page.tsx b/src/app/(app)/society/profile/page.tsx
+index 95c2d48..91f315f 100644
+--- a/src/app/(app)/society/profile/page.tsx
++++ b/src/app/(app)/society/profile/page.tsx
+@@ -1,89 +1,164 @@
+-import { Building2, MapPin, Phone, Mail, Landmark, Users, Home } from "lucide-react";
++"use client";
++
++import { FormEvent, useEffect, useState } from "react";
++import { Building2, Home, Landmark, Mail, MapPin, Phone, Users } from "lucide-react";
+ import { PageHeader } from "@/components/layout/PageHeader";
+-import { Card, CardHeader, CardBody } from "@/components/ui/Card";
++import { Card, CardBody, CardHeader } from "@/components/ui/Card";
+ import { Button } from "@/components/ui/Button";
+-import { Input, Textarea, Select } from "@/components/ui/Input";
+-import { FileUpload } from "@/components/ui/FileUpload";
+-import { society, buildings } from "@/lib/mock-data";
++import { Input, Select, Textarea } from "@/components/ui/Input";
++import { getSocietySession, saveActiveSociety } from "@/lib/session";
++
++const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:5000/api/v1";
++
++type SocietyProfile = {
++  id: number; society_code: string; society_name: string; registration_no: string;
++  registration_type: string; address: string; city: string; state: string;
++  pincode: string; pan_number: string; email: string; mobile: string; logo: string;
++  established_date: string; buildings: number; flats: number; total_members: number; status: string;
++};
++
++const EMPTY_PROFILE: SocietyProfile = {
++  id: 0, society_code: "", society_name: "", registration_no: "",
++  registration_type: "Co-operative Housing Society", address: "", city: "",
++  state: "Maharashtra", pincode: "", pan_number: "", email: "", mobile: "",
++  logo: "", established_date: "", buildings: 0, flats: 0, total_members: 0, status: "ACTIVE",
++};
++
++const normalizeProfile = (profile: Partial<SocietyProfile>): SocietyProfile => ({
++  ...EMPTY_PROFILE,
++  ...profile,
++  established_date: profile.established_date ? String(profile.established_date).slice(0, 10) : "",
++});
+ 
+ export default function SocietyProfilePage() {
++  const [profile, setProfile] = useState<SocietyProfile>(EMPTY_PROFILE);
++  const [loading, setLoading] = useState(true);
++  const [saving, setSaving] = useState(false);
++  const [error, setError] = useState("");
++  const [success, setSuccess] = useState("");
++
++  useEffect(() => {
++    const loadProfile = async () => {
++      const session = getSocietySession();
++      if (!session?.accessToken || !session.activeSociety) {
++        setError("Please select a society before opening its profile.");
++        setLoading(false);
++        return;
++      }
++      try {
++        const response = await fetch(`${API_URL}/society/profile`, {
++          headers: { Authorization: `Bearer ${session.accessToken}` },
++        });
++        const result = await response.json();
++        if (!response.ok || !result.success) throw new Error(result.message || "Unable to load society profile.");
++        setProfile(normalizeProfile(result.data));
++      } catch (loadError) {
++        setError(loadError instanceof Error ? loadError.message : "Unable to load society profile.");
++      } finally {
++        setLoading(false);
++      }
++    };
++    void loadProfile();
++  }, []);
++
++  const updateField = (field: keyof SocietyProfile, value: string) => {
++    setProfile((current) => ({ ...current, [field]: value }));
++  };
++
++  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
++    event.preventDefault();
++    const session = getSocietySession();
++    if (!session?.accessToken || !session.activeSociety) {
++      setError("Your active society session is missing. Please select the society again.");
++      return;
++    }
++
++    setSaving(true); setError(""); setSuccess("");
++    try {
++      const response = await fetch(`${API_URL}/society/profile`, {
++        method: "PUT",
++        headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.accessToken}` },
++        body: JSON.stringify({
++          society_name: profile.society_name, registration_no: profile.registration_no,
++          registration_type: profile.registration_type, address: profile.address,
++          city: profile.city, state: profile.state, pincode: profile.pincode,
++          pan_number: profile.pan_number, email: profile.email, mobile: profile.mobile,
++          logo: profile.logo, established_date: profile.established_date,
++        }),
++      });
++      const result = await response.json();
++      if (!response.ok || !result.success) {
++        const validationMessage = Array.isArray(result.errors) ? result.errors.join(", ") : "";
++        throw new Error(validationMessage || result.message || "Unable to update society profile.");
++      }
++
++      const nextProfile = normalizeProfile(result.data);
++      setProfile(nextProfile);
++      let activeRoles: string[] = [];
++      try { activeRoles = JSON.parse(session.storage.getItem("society_active_roles") || "[]"); } catch { activeRoles = []; }
++      saveActiveSociety(session.storage, {
++        ...session.activeSociety, id: nextProfile.id, code: nextProfile.society_code,
++        name: nextProfile.society_name, logo: nextProfile.logo || null,
++      }, session.accessToken, activeRoles);
++      setSuccess("Society profile updated successfully.");
++    } catch (saveError) {
++      setError(saveError instanceof Error ? saveError.message : "Unable to update society profile.");
++    } finally {
++      setSaving(false);
++    }
++  }
++
++  if (loading) {
++    return <Card><CardBody className="py-16 text-center text-sm text-[var(--color-text-secondary)]">Loading society profile...</CardBody></Card>;
++  }
++
+   return (
+-    <div>
+-      <PageHeader
+-        title="Society Profile"
+-        description="Manage your society's registration and contact details"
+-        actions={<Button>Save Changes</Button>}
+-      />
++    <form onSubmit={handleSubmit}>
++      <PageHeader title="Society Profile" description={`Manage registration and contact details for ${profile.society_name || "the selected society"}.`} actions={<Button type="submit" loading={saving}>Save Changes</Button>} />
++      {error && <p className="mb-4 rounded-[var(--radius-md)] bg-[var(--color-danger)]/10 px-4 py-3 text-sm text-[var(--color-danger)]">{error}</p>}
++      {success && <p className="mb-4 rounded-[var(--radius-md)] bg-[var(--color-success-bg)] px-4 py-3 text-sm text-[var(--color-success)]">{success}</p>}
+ 
+       <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
+         <Card className="lg:col-span-2">
+-          <CardHeader title="Basic Information" />
++          <CardHeader title="Basic Information" description="Society code is permanent; all other details can be updated." />
+           <CardBody className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+-            <Input label="Society Name" defaultValue={society.name} required wrapperClassName="sm:col-span-2" />
+-            <Input label="Registration Number" defaultValue={society.registrationNo} required />
+-            <Select
+-              label="Registration Type"
+-              options={[{ label: "Co-operative Housing Society", value: "chs" }, { label: "Apartment Owners Association", value: "aoa" }]}
+-              defaultValue="chs"
+-            />
+-            <Textarea label="Registered Address" defaultValue={society.address} wrapperClassName="sm:col-span-2" />
+-            <Input label="City" defaultValue="Pune" />
+-            <Input label="State" defaultValue="Maharashtra" />
+-            <Input label="Pincode" defaultValue="411045" />
+-            <Input label="PAN Number" defaultValue="AABCG1234H" />
+-            <Input label="Contact Number" defaultValue="+91 98220 11234" icon={<Phone className="h-4 w-4" />} />
+-            <Input label="Email Address" defaultValue="office@greenvalleychs.org" icon={<Mail className="h-4 w-4" />} />
++            <Input label="Society Code" value={profile.society_code} disabled />
++            <Input label="Society Name" required value={profile.society_name} onChange={(e) => updateField("society_name", e.target.value)} />
++            <Input label="Registration Number" value={profile.registration_no} onChange={(e) => updateField("registration_no", e.target.value)} />
++            <Select label="Registration Type" options={[
++              { label: "Co-operative Housing Society", value: "Co-operative Housing Society" },
++              { label: "Apartment Owners Association", value: "Apartment Owners Association" },
++              { label: "Residential Welfare Association", value: "Residential Welfare Association" },
++            ]} value={profile.registration_type} onChange={(e) => updateField("registration_type", e.target.value)} />
++            <Textarea label="Registered Address" value={profile.address} onChange={(e) => updateField("address", e.target.value)} wrapperClassName="sm:col-span-2" />
++            <Input label="City" value={profile.city} onChange={(e) => updateField("city", e.target.value)} />
++            <Input label="State" value={profile.state} onChange={(e) => updateField("state", e.target.value)} />
++            <Input label="Pincode" inputMode="numeric" maxLength={6} value={profile.pincode} onChange={(e) => updateField("pincode", e.target.value.replace(/\D/g, ""))} />
++            <Input label="PAN Number" value={profile.pan_number} onChange={(e) => updateField("pan_number", e.target.value.toUpperCase())} />
++            <Input label="Contact Number" inputMode="tel" icon={<Phone className="h-4 w-4" />} value={profile.mobile} onChange={(e) => updateField("mobile", e.target.value)} />
++            <Input label="Email Address" type="email" icon={<Mail className="h-4 w-4" />} value={profile.email} onChange={(e) => updateField("email", e.target.value)} />
++            <Input label="Established Date" type="date" value={profile.established_date} onChange={(e) => updateField("established_date", e.target.value)} />
++            <Input label="Logo URL" type="url" value={profile.logo} onChange={(e) => updateField("logo", e.target.value)} helpText="Image upload will be added with the Documents module." />
+           </CardBody>
+         </Card>
+ 
+-        <div className="flex flex-col gap-5">
+-          <Card>
+-            <CardHeader title="Society Logo" />
+-            <CardBody>
+-              <FileUpload variant="image" helpText="Recommended 400x400px, PNG or JPG" />
+-            </CardBody>
+-          </Card>
+-          <Card>
+-            <CardHeader title="At a Glance" />
+-            <CardBody className="flex flex-col gap-3">
+-              <div className="flex items-center gap-3">
+-                <Building2 className="h-4 w-4 text-[var(--color-text-muted)]" />
+-                <span className="text-sm text-[var(--color-text-secondary)]">{society.totalBuildings} Buildings</span>
+-              </div>
+-              <div className="flex items-center gap-3">
+-                <Home className="h-4 w-4 text-[var(--color-text-muted)]" />
+-                <span className="text-sm text-[var(--color-text-secondary)]">{society.totalFlats} Flats</span>
+-              </div>
+-              <div className="flex items-center gap-3">
+-                <Users className="h-4 w-4 text-[var(--color-text-muted)]" />
+-                <span className="text-sm text-[var(--color-text-secondary)]">421 Members</span>
+-              </div>
+-              <div className="flex items-center gap-3">
+-                <Landmark className="h-4 w-4 text-[var(--color-text-muted)]" />
+-                <span className="text-sm text-[var(--color-text-secondary)]">Registered 2011</span>
+-              </div>
+-              <div className="flex items-center gap-3">
+-                <MapPin className="h-4 w-4 text-[var(--color-text-muted)]" />
+-                <span className="text-sm text-[var(--color-text-secondary)]">{society.city}</span>
+-              </div>
+-            </CardBody>
+-          </Card>
+-        </div>
++        <Card className="h-fit">
++          <CardHeader title="At a Glance" />
++          <CardBody className="flex flex-col gap-4">
++            {profile.logo ? <img src={profile.logo} alt={`${profile.society_name} logo`} className="mx-auto h-24 w-24 rounded-[var(--radius-lg)] border border-[var(--color-border)] object-cover" /> : <div className="mx-auto flex h-24 w-24 items-center justify-center rounded-[var(--radius-lg)] bg-[var(--color-primary)]/10 text-[var(--color-primary)]"><Building2 className="h-9 w-9" /></div>}
++            <div className="flex items-center gap-3"><Building2 className="h-4 w-4 text-[var(--color-text-muted)]" /><span className="text-sm text-[var(--color-text-secondary)]">{profile.buildings} Buildings</span></div>
++            <div className="flex items-center gap-3"><Home className="h-4 w-4 text-[var(--color-text-muted)]" /><span className="text-sm text-[var(--color-text-secondary)]">{profile.flats} Flats</span></div>
++            <div className="flex items-center gap-3"><Users className="h-4 w-4 text-[var(--color-text-muted)]" /><span className="text-sm text-[var(--color-text-secondary)]">{profile.total_members} Members</span></div>
++            <div className="flex items-center gap-3"><Landmark className="h-4 w-4 text-[var(--color-text-muted)]" /><span className="text-sm text-[var(--color-text-secondary)]">{profile.established_date ? `Established ${profile.established_date.slice(0, 4)}` : "Established date not added"}</span></div>
++            <div className="flex items-center gap-3"><MapPin className="h-4 w-4 text-[var(--color-text-muted)]" /><span className="text-sm text-[var(--color-text-secondary)]">{[profile.city, profile.state].filter(Boolean).join(", ") || "Location not added"}</span></div>
++          </CardBody>
++        </Card>
+       </div>
+ 
+       <Card className="mt-5">
+-        <CardHeader title="Buildings Overview" description="Quick summary of all buildings in this society" />
+-        <div className="grid grid-cols-1 gap-4 p-5 sm:grid-cols-2 lg:grid-cols-3">
+-          {buildings.map((b) => (
+-            <div key={b.id} className="rounded-[var(--radius-md)] border border-[var(--color-border)] p-4">
+-              <p className="text-sm font-semibold text-[var(--color-text)]">{b.name}</p>
+-              <p className="mt-1 text-xs text-[var(--color-text-secondary)]">
+-                {b.wings.length} Wing(s) · {b.totalFloors} Floors · {b.totalFlats} Flats
+-              </p>
+-            </div>
+-          ))}
+-        </div>
++        <CardHeader title="Buildings Overview" description="Buildings created for this selected society will appear here." />
++        <CardBody className="text-sm text-[var(--color-text-secondary)]">Building management will be connected in the next Society Setup step.</CardBody>
+       </Card>
+-    </div>
++    </form>
+   );
+ }
+-- 
+2.51.1
+

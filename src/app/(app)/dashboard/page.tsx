@@ -1,3 +1,6 @@
+"use client";
+
+import { useEffect, useState } from "react";
 import {
   Building2,
   Home,
@@ -325,6 +328,3 @@ export default function DashboardPage() {
     </div>
   );
 }
-"use client";
-
-import { useEffect, useState } from "react";
