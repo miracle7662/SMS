@@ -1,6 +1,7 @@
 import buildingRepository from '../repositories/building.repository.js';
 import auditRepository from '../repositories/audit.repository.js';
 import { ApiError } from '../utils/api-error.js';
+import flatRepository from '../repositories/flat.repository.js';
 
 const normalizeCode = (value) => value.trim().toUpperCase().replace(/\s+/g, '-');
 const normalizeWings = (wings) => wings.map((wing) => ({
@@ -40,6 +41,13 @@ class BuildingService {
     if (new Set(wings.map((wing) => wing.wing_code)).size !== wings.length) {
       throw new ApiError(400, 'Wing codes must be unique within a building');
     }
+    if (await flatRepository.countByBuilding(societyId, buildingId)) {
+      const nextWingCodes = new Set(wings.map((wing) => wing.wing_code));
+      const removesExistingWing = current.wings.some((wing) => !nextWingCodes.has(wing.wing_code));
+      if (removesExistingWing) {
+        throw new ApiError(409, 'A wing cannot be removed after flats have been created in this building');
+      }
+    }
     const updated = await buildingRepository.update(societyId, buildingId, {
       ...payload,
       building_code: buildingCode,
@@ -52,6 +60,9 @@ class BuildingService {
   async remove(societyId, buildingId, userId, requestMeta) {
     const current = await buildingRepository.getById(societyId, buildingId);
     if (!current) throw new ApiError(404, 'Building not found in the selected society');
+    if (await flatRepository.countByBuilding(societyId, buildingId)) {
+      throw new ApiError(409, 'Delete the flats in this building before deleting the building');
+    }
     await buildingRepository.softDelete(societyId, buildingId, userId);
     await this.audit('delete', societyId, userId, null, current, requestMeta);
   }

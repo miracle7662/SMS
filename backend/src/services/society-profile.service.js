@@ -3,8 +3,9 @@ import auditRepository from '../repositories/audit.repository.js';
 import { ApiError } from '../utils/api-error.js';
 import { normalizeEmail, normalizeMobile } from '../utils/normalize.js';
 import buildingRepository from '../repositories/building.repository.js';
+import flatRepository from '../repositories/flat.repository.js';
 
-const toSafeProfile = (society, buildingCount = society.buildings ?? 0) => ({
+const toSafeProfile = (society, buildingCount = society.buildings ?? 0, flatCount = society.flats ?? 0) => ({
   id: society.id,
   society_code: society.society_code,
   society_name: society.society_name,
@@ -20,7 +21,7 @@ const toSafeProfile = (society, buildingCount = society.buildings ?? 0) => ({
   logo: society.logo,
   established_date: society.established_date,
   buildings: buildingCount,
-  flats: society.flats ?? 0,
+  flats: flatCount,
   total_members: society.total_members ?? 0,
   status: society.status,
 });
@@ -29,7 +30,8 @@ class SocietyProfileService {
   async get(societyId) {
     const society = await SocietyRepository.getById(societyId);
     if (!society || society.status !== 'ACTIVE') throw new ApiError(404, 'Active society not found');
-    return toSafeProfile(society, await buildingRepository.count(societyId));
+    const [buildingCount, flatCount] = await Promise.all([buildingRepository.count(societyId), flatRepository.count(societyId)]);
+    return toSafeProfile(society, buildingCount, flatCount);
   }
 
   async update(societyId, payload, userId, ipAddress, userAgent) {
@@ -43,15 +45,15 @@ class SocietyProfileService {
       mobile: payload.mobile ? normalizeMobile(payload.mobile) : null,
     }, userId);
 
-    const buildingCount = await buildingRepository.count(societyId);
-    const safeUpdated = toSafeProfile(updated, buildingCount);
+    const [buildingCount, flatCount] = await Promise.all([buildingRepository.count(societyId), flatRepository.count(societyId)]);
+    const safeUpdated = toSafeProfile(updated, buildingCount, flatCount);
     await auditRepository.log({
       societyId,
       userId,
       moduleName: 'society_profile',
       action: 'update',
       recordId: societyId,
-      oldData: toSafeProfile(current, buildingCount),
+      oldData: toSafeProfile(current, buildingCount, flatCount),
       newData: safeUpdated,
       ipAddress,
       userAgent,

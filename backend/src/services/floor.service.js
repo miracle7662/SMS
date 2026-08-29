@@ -1,6 +1,7 @@
 import floorRepository from '../repositories/floor.repository.js';
 import auditRepository from '../repositories/audit.repository.js';
 import { ApiError } from '../utils/api-error.js';
+import flatRepository from '../repositories/flat.repository.js';
 
 const defaultFloorName = (number) => number === 0 ? 'Ground Floor' : number < 0 ? `Basement ${Math.abs(number)}` : `Floor ${number}`;
 
@@ -40,6 +41,9 @@ class FloorService {
   async remove(societyId, floorId, userId, requestMeta) {
     const current = await floorRepository.getById(societyId, floorId);
     if (!current) throw new ApiError(404, 'Floor not found in the selected society');
+    if (await flatRepository.countByFloor(societyId, floorId)) {
+      throw new ApiError(409, 'Delete the flats on this floor before deleting the floor');
+    }
     await floorRepository.softDelete(societyId, floorId, userId);
     await auditRepository.log({
       societyId, userId, moduleName: 'floors', action: 'delete', recordId: floorId,
