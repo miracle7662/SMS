@@ -15,10 +15,13 @@ import {
   UserCog,
   Settings as SettingsIcon,
   Check,
+  Building2,
+  ArrowLeft,
 } from "lucide-react";
 import { Dropdown } from "@/components/ui/Dropdown";
 import { cn, initials, formatDateTime } from "@/lib/utils";
 import { notifications as mockNotifications } from "@/lib/mock-data";
+import { clearActiveSociety, clearSocietySession, SocietySession } from "@/lib/session";
 
 const API_URL =
   process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:5000/api/v1";
@@ -28,11 +31,13 @@ export function Header({
   onOpenMobile,
   dark,
   onToggleDark,
+  session,
 }: {
   onToggleSidebar: () => void;
   onOpenMobile: () => void;
   dark: boolean;
   onToggleDark: () => void;
+  session: SocietySession | null;
 }) {
   const router = useRouter();
 
@@ -70,17 +75,7 @@ export function Header({
     } catch (error) {
       console.error("Logout API failed:", error);
     } finally {
-      // Clear localStorage
-      localStorage.removeItem("society_access_token");
-      localStorage.removeItem("society_refresh_token");
-      localStorage.removeItem("society_user");
-
-      // Clear sessionStorage
-      sessionStorage.removeItem("society_access_token");
-      sessionStorage.removeItem("society_refresh_token");
-      sessionStorage.removeItem("society_user");
-
-      // Redirect to login
+      clearSocietySession();
       router.push("/login");
     }
   }
@@ -112,6 +107,17 @@ export function Header({
       </div>
 
       <div className="ml-auto flex items-center gap-1 sm:gap-2">
+        {session?.activeSociety && (
+          <button
+            type="button"
+            onClick={() => router.push("/select-society")}
+            className="hidden items-center gap-2 rounded-[var(--radius-md)] border border-[var(--color-border)] px-3 py-2 text-xs font-medium text-[var(--color-text-secondary)] hover:bg-[var(--color-bg)] md:flex"
+            title="Switch society"
+          >
+            <Building2 className="h-4 w-4 text-[var(--color-primary)]" />
+            <span className="max-w-44 truncate">{session.activeSociety.name ?? session.activeSociety.society_name ?? "Selected Society"}</span>
+          </button>
+        )}
         {/* Help */}
         <button
           className="hidden h-9 w-9 items-center justify-center rounded-md text-[var(--color-text-secondary)] hover:bg-[var(--color-bg)] sm:flex"
@@ -220,17 +226,30 @@ export function Header({
           trigger={
             <button className="flex items-center gap-2 rounded-md py-1 pl-1 pr-2 hover:bg-[var(--color-bg)]">
               <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[var(--color-primary)] text-xs font-semibold text-white">
-                {initials("Anil Deshmukh")}
+                {initials(session?.user?.name || "User")}
               </div>
 
               <span className="hidden text-sm font-medium text-[var(--color-text)] sm:block">
-                Anil Deshmukh
+                {session?.user?.name || "User"}
               </span>
 
               <ChevronDown className="hidden h-3.5 w-3.5 text-[var(--color-text-muted)] sm:block" />
             </button>
           }
           items={[
+            ...(session?.isSuperAdmin && session.activeSociety ? [{
+              label: "Back to Super Admin",
+              icon: <ArrowLeft className="h-4 w-4" />,
+              onClick: () => {
+                clearActiveSociety(session.storage);
+                router.push("/super-admin/societies");
+              },
+            }] : []),
+            ...(session?.activeSociety ? [{
+              label: "Switch Society",
+              icon: <Building2 className="h-4 w-4" />,
+              onClick: () => router.push("/select-society"),
+            }] : []),
             {
               label: "My Profile",
               icon: <UserCog className="h-4 w-4" />,

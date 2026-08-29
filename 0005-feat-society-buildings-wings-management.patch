@@ -1,0 +1,707 @@
+From 1f1afd9a92aaa195b35b7574acbb9349a4f6892c Mon Sep 17 00:00:00 2001
+From: Codex <codex@openai.com>
+Date: Sat, 29 Aug 2026 15:34:43 +0000
+Subject: [PATCH] feat(society): add buildings and wings management
+
+---
+ .../migrations/002_buildings_and_wings.sql    |  54 +++++
+ .../src/controllers/building.controller.js    |  24 ++
+ .../src/repositories/building.repository.js   | 164 ++++++++++++++
+ backend/src/routes/building.routes.js         |  15 ++
+ backend/src/routes/index.js                   |   2 +
+ backend/src/services/building.service.js      |  68 ++++++
+ .../src/services/society-profile.service.js   |  12 +-
+ backend/src/validators/building.validators.js |  13 ++
+ src/app/(app)/society/buildings/page.tsx      | 210 ++++++++++++------
+ 9 files changed, 492 insertions(+), 70 deletions(-)
+ create mode 100644 backend/database/migrations/002_buildings_and_wings.sql
+ create mode 100644 backend/src/controllers/building.controller.js
+ create mode 100644 backend/src/repositories/building.repository.js
+ create mode 100644 backend/src/routes/building.routes.js
+ create mode 100644 backend/src/services/building.service.js
+ create mode 100644 backend/src/validators/building.validators.js
+
+diff --git a/backend/database/migrations/002_buildings_and_wings.sql b/backend/database/migrations/002_buildings_and_wings.sql
+new file mode 100644
+index 0000000..55fac30
+--- /dev/null
++++ b/backend/database/migrations/002_buildings_and_wings.sql
+@@ -0,0 +1,54 @@
++CREATE TABLE IF NOT EXISTS buildings (
++  id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
++  society_id BIGINT UNSIGNED NOT NULL,
++  building_code VARCHAR(50) NOT NULL,
++  building_name VARCHAR(150) NOT NULL,
++  floors_per_wing INT UNSIGNED NOT NULL DEFAULT 0,
++  flats_per_floor INT UNSIGNED NOT NULL DEFAULT 0,
++  status ENUM('ACTIVE','INACTIVE') NOT NULL DEFAULT 'ACTIVE',
++  created_by BIGINT UNSIGNED NULL,
++  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
++  updated_by BIGINT UNSIGNED NULL,
++  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
++  deleted_at TIMESTAMP NULL,
++  UNIQUE KEY uk_building_society_code (society_id, building_code),
++  KEY idx_buildings_society_status (society_id, status),
++  CONSTRAINT fk_buildings_society FOREIGN KEY (society_id) REFERENCES societies(id) ON DELETE RESTRICT ON UPDATE CASCADE
++) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
++
++CREATE TABLE IF NOT EXISTS building_wings (
++  id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
++  society_id BIGINT UNSIGNED NOT NULL,
++  building_id BIGINT UNSIGNED NOT NULL,
++  wing_code VARCHAR(50) NOT NULL,
++  wing_name VARCHAR(100) NOT NULL,
++  status ENUM('ACTIVE','INACTIVE') NOT NULL DEFAULT 'ACTIVE',
++  created_by BIGINT UNSIGNED NULL,
++  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
++  updated_by BIGINT UNSIGNED NULL,
++  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
++  deleted_at TIMESTAMP NULL,
++  UNIQUE KEY uk_wing_building_code (building_id, wing_code),
++  KEY idx_wings_society_building (society_id, building_id, status),
++  CONSTRAINT fk_wings_society FOREIGN KEY (society_id) REFERENCES societies(id) ON DELETE RESTRICT ON UPDATE CASCADE,
++  CONSTRAINT fk_wings_building FOREIGN KEY (building_id) REFERENCES buildings(id) ON DELETE RESTRICT ON UPDATE CASCADE
++) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
++
++INSERT INTO permissions (permission_name, permission_code, module_name, description, status)
++VALUES
++  ('View Buildings', 'society.buildings.view', 'society', 'View buildings and wings', 'ACTIVE'),
++  ('Create Buildings', 'society.buildings.create', 'society', 'Create buildings and wings', 'ACTIVE'),
++  ('Update Buildings', 'society.buildings.update', 'society', 'Update buildings and wings', 'ACTIVE'),
++  ('Delete Buildings', 'society.buildings.delete', 'society', 'Deactivate buildings and wings', 'ACTIVE')
++ON DUPLICATE KEY UPDATE status = 'ACTIVE';
++
++INSERT INTO role_permissions (role_id, permission_id)
++SELECT r.id, p.id FROM roles r CROSS JOIN permissions p
++WHERE r.role_code IN ('SUPER_ADMIN','SOCIETY_ADMIN') AND p.permission_code LIKE 'society.buildings.%'
++ON DUPLICATE KEY UPDATE permission_id = VALUES(permission_id);
++
++INSERT INTO role_permissions (role_id, permission_id)
++SELECT r.id, p.id FROM roles r CROSS JOIN permissions p
++WHERE r.role_code IN ('CHAIRMAN','SECRETARY','TREASURER','ACCOUNTANT','SECURITY','RESIDENT')
++  AND p.permission_code = 'society.buildings.view'
++ON DUPLICATE KEY UPDATE permission_id = VALUES(permission_id);
+diff --git a/backend/src/controllers/building.controller.js b/backend/src/controllers/building.controller.js
+new file mode 100644
+index 0000000..931445b
+--- /dev/null
++++ b/backend/src/controllers/building.controller.js
+@@ -0,0 +1,24 @@
++import buildingService from '../services/building.service.js';
++import { asyncHandler } from '../utils/async-handler.js';
++import { sendSuccess } from '../utils/api-response.js';
++
++const requestMeta = (req) => ({ ipAddress: req.ip, userAgent: req.get('user-agent') });
++
++export const listBuildings = asyncHandler(async (req, res) => sendSuccess(
++  res, 200, 'Buildings fetched successfully', await buildingService.list(req.auth.activeSocietyId)
++));
++
++export const createBuilding = asyncHandler(async (req, res) => sendSuccess(
++  res, 201, 'Building created successfully',
++  await buildingService.create(req.auth.activeSocietyId, req.body, req.auth.userId, requestMeta(req))
++));
++
++export const updateBuilding = asyncHandler(async (req, res) => sendSuccess(
++  res, 200, 'Building updated successfully',
++  await buildingService.update(req.auth.activeSocietyId, Number(req.params.id), req.body, req.auth.userId, requestMeta(req))
++));
++
++export const deleteBuilding = asyncHandler(async (req, res) => {
++  await buildingService.remove(req.auth.activeSocietyId, Number(req.params.id), req.auth.userId, requestMeta(req));
++  return sendSuccess(res, 200, 'Building deleted successfully');
++});
+diff --git a/backend/src/repositories/building.repository.js b/backend/src/repositories/building.repository.js
+new file mode 100644
+index 0000000..2032234
+--- /dev/null
++++ b/backend/src/repositories/building.repository.js
+@@ -0,0 +1,164 @@
++import { getPool } from '../config/database.js';
++
++class BuildingRepository {
++  async list(societyId) {
++    const pool = getPool();
++    const [buildings] = await pool.execute(
++      `SELECT id, society_id, building_code, building_name, floors_per_wing,
++              flats_per_floor, status, created_at, updated_at
++       FROM buildings
++       WHERE society_id = ? AND deleted_at IS NULL
++       ORDER BY building_name ASC`,
++      [societyId]
++    );
++    if (!buildings.length) return [];
++
++    const [wings] = await pool.execute(
++      `SELECT id, building_id, wing_code, wing_name, status
++       FROM building_wings
++       WHERE society_id = ? AND deleted_at IS NULL
++       ORDER BY building_id, wing_name`,
++      [societyId]
++    );
++    return buildings.map((building) => this.withComputedValues(
++      building,
++      wings.filter((wing) => Number(wing.building_id) === Number(building.id))
++    ));
++  }
++
++  async getById(societyId, buildingId) {
++    const pool = getPool();
++    const [rows] = await pool.execute(
++      `SELECT id, society_id, building_code, building_name, floors_per_wing,
++              flats_per_floor, status, created_at, updated_at
++       FROM buildings
++       WHERE id = ? AND society_id = ? AND deleted_at IS NULL LIMIT 1`,
++      [buildingId, societyId]
++    );
++    if (!rows[0]) return null;
++    const [wings] = await pool.execute(
++      `SELECT id, building_id, wing_code, wing_name, status
++       FROM building_wings
++       WHERE building_id = ? AND society_id = ? AND deleted_at IS NULL
++       ORDER BY wing_name`,
++      [buildingId, societyId]
++    );
++    return this.withComputedValues(rows[0], wings);
++  }
++
++  async findByCode(societyId, code, excludeId = null) {
++    const pool = getPool();
++    let query = `SELECT id FROM buildings WHERE society_id = ? AND building_code = ?`;
++    const params = [societyId, code];
++    if (excludeId) { query += ' AND id <> ?'; params.push(excludeId); }
++    query += ' LIMIT 1';
++    const [rows] = await pool.execute(query, params);
++    return rows[0] || null;
++  }
++
++  async count(societyId) {
++    const [rows] = await getPool().execute(
++      `SELECT COUNT(*) AS total FROM buildings WHERE society_id = ? AND deleted_at IS NULL AND status = 'ACTIVE'`,
++      [societyId]
++    );
++    return Number(rows[0]?.total ?? 0);
++  }
++
++  async create(societyId, building, wings, userId) {
++    const connection = await getPool().getConnection();
++    try {
++      await connection.beginTransaction();
++      const [result] = await connection.execute(
++        `INSERT INTO buildings
++          (society_id, building_code, building_name, floors_per_wing, flats_per_floor, status, created_by, updated_by)
++         VALUES (?, ?, ?, ?, ?, 'ACTIVE', ?, ?)`,
++        [societyId, building.building_code, building.building_name, building.floors_per_wing, building.flats_per_floor, userId, userId]
++      );
++      for (const wing of wings) {
++        await connection.execute(
++          `INSERT INTO building_wings
++            (society_id, building_id, wing_code, wing_name, status, created_by, updated_by)
++           VALUES (?, ?, ?, ?, 'ACTIVE', ?, ?)`,
++          [societyId, result.insertId, wing.wing_code, wing.wing_name, userId, userId]
++        );
++      }
++      await connection.commit();
++      return this.getById(societyId, result.insertId);
++    } catch (error) {
++      await connection.rollback();
++      throw error;
++    } finally {
++      connection.release();
++    }
++  }
++
++  async update(societyId, buildingId, building, wings, userId) {
++    const connection = await getPool().getConnection();
++    try {
++      await connection.beginTransaction();
++      await connection.execute(
++        `UPDATE buildings
++         SET building_code = ?, building_name = ?, floors_per_wing = ?, flats_per_floor = ?, updated_by = ?
++         WHERE id = ? AND society_id = ? AND deleted_at IS NULL`,
++        [building.building_code, building.building_name, building.floors_per_wing, building.flats_per_floor, userId, buildingId, societyId]
++      );
++      await connection.execute(
++        `UPDATE building_wings SET deleted_at = CURRENT_TIMESTAMP, status = 'INACTIVE', updated_by = ?
++         WHERE building_id = ? AND society_id = ? AND deleted_at IS NULL`,
++        [userId, buildingId, societyId]
++      );
++      for (const wing of wings) {
++        await connection.execute(
++          `INSERT INTO building_wings
++            (society_id, building_id, wing_code, wing_name, status, created_by, updated_by, deleted_at)
++           VALUES (?, ?, ?, ?, 'ACTIVE', ?, ?, NULL)
++           ON DUPLICATE KEY UPDATE wing_name = VALUES(wing_name), status = 'ACTIVE', updated_by = VALUES(updated_by), deleted_at = NULL`,
++          [societyId, buildingId, wing.wing_code, wing.wing_name, userId, userId]
++        );
++      }
++      await connection.commit();
++      return this.getById(societyId, buildingId);
++    } catch (error) {
++      await connection.rollback();
++      throw error;
++    } finally {
++      connection.release();
++    }
++  }
++
++  async softDelete(societyId, buildingId, userId) {
++    const connection = await getPool().getConnection();
++    try {
++      await connection.beginTransaction();
++      const [result] = await connection.execute(
++        `UPDATE buildings SET status = 'INACTIVE', deleted_at = CURRENT_TIMESTAMP, updated_by = ?
++         WHERE id = ? AND society_id = ? AND deleted_at IS NULL`,
++        [userId, buildingId, societyId]
++      );
++      await connection.execute(
++        `UPDATE building_wings SET status = 'INACTIVE', deleted_at = CURRENT_TIMESTAMP, updated_by = ?
++         WHERE building_id = ? AND society_id = ? AND deleted_at IS NULL`,
++        [userId, buildingId, societyId]
++      );
++      await connection.commit();
++      return result.affectedRows > 0;
++    } catch (error) {
++      await connection.rollback();
++      throw error;
++    } finally {
++      connection.release();
++    }
++  }
++
++  withComputedValues(building, wings) {
++    const activeWings = wings.filter((wing) => wing.status === 'ACTIVE');
++    return {
++      ...building,
++      wings: activeWings,
++      total_floors: activeWings.length * Number(building.floors_per_wing),
++      total_flats: activeWings.length * Number(building.floors_per_wing) * Number(building.flats_per_floor),
++    };
++  }
++}
++
++export default new BuildingRepository();
+diff --git a/backend/src/routes/building.routes.js b/backend/src/routes/building.routes.js
+new file mode 100644
+index 0000000..372f5a2
+--- /dev/null
++++ b/backend/src/routes/building.routes.js
+@@ -0,0 +1,15 @@
++import express from 'express';
++import { createBuilding, deleteBuilding, listBuildings, updateBuilding } from '../controllers/building.controller.js';
++import { authenticate } from '../middleware/authenticate.middleware.js';
++import { authorizePermissions, requireActiveSociety } from '../middleware/authorize.middleware.js';
++import { handleValidationErrors } from '../validators/auth.validators.js';
++import { validateBuilding, validateBuildingId } from '../validators/building.validators.js';
++
++const router = express.Router();
++router.use(authenticate, requireActiveSociety);
++router.get('/', authorizePermissions('society.buildings.view'), listBuildings);
++router.post('/', authorizePermissions('society.buildings.create'), validateBuilding, handleValidationErrors, createBuilding);
++router.put('/:id', authorizePermissions('society.buildings.update'), validateBuildingId, validateBuilding, handleValidationErrors, updateBuilding);
++router.delete('/:id', authorizePermissions('society.buildings.delete'), validateBuildingId, handleValidationErrors, deleteBuilding);
++
++export default router;
+diff --git a/backend/src/routes/index.js b/backend/src/routes/index.js
+index c4fb6d5..2536109 100644
+--- a/backend/src/routes/index.js
++++ b/backend/src/routes/index.js
+@@ -3,6 +3,7 @@ import healthRoutes from './health.routes.js';
+ import authRoutes from './auth.routes.js';
+ import platformRoutes from './platform.routes.js';
+ import societyProfileRoutes from './society-profile.routes.js';
++import buildingRoutes from './building.routes.js';
+ 
+ const router = express.Router();
+ 
+@@ -12,6 +13,7 @@ router.use('/', healthRoutes);
+ // Authentication routes
+ router.use('/auth', authRoutes);
+ router.use('/platform', platformRoutes);
++router.use('/society/buildings', buildingRoutes);
+ router.use('/society', societyProfileRoutes);
+ 
+ export default router;
+diff --git a/backend/src/services/building.service.js b/backend/src/services/building.service.js
+new file mode 100644
+index 0000000..ca4ece5
+--- /dev/null
++++ b/backend/src/services/building.service.js
+@@ -0,0 +1,68 @@
++import buildingRepository from '../repositories/building.repository.js';
++import auditRepository from '../repositories/audit.repository.js';
++import { ApiError } from '../utils/api-error.js';
++
++const normalizeCode = (value) => value.trim().toUpperCase().replace(/\s+/g, '-');
++const normalizeWings = (wings) => wings.map((wing) => ({
++  wing_code: normalizeCode(wing.wing_code),
++  wing_name: wing.wing_name.trim(),
++}));
++
++class BuildingService {
++  list(societyId) { return buildingRepository.list(societyId); }
++
++  async create(societyId, payload, userId, requestMeta) {
++    const buildingCode = normalizeCode(payload.building_code);
++    if (await buildingRepository.findByCode(societyId, buildingCode)) {
++      throw new ApiError(409, 'Building code already exists in this society');
++    }
++    const wings = normalizeWings(payload.wings);
++    if (new Set(wings.map((wing) => wing.wing_code)).size !== wings.length) {
++      throw new ApiError(400, 'Wing codes must be unique within a building');
++    }
++    const created = await buildingRepository.create(societyId, {
++      ...payload,
++      building_code: buildingCode,
++      building_name: payload.building_name.trim(),
++    }, wings, userId);
++    await this.audit('create', societyId, userId, created, null, requestMeta);
++    return created;
++  }
++
++  async update(societyId, buildingId, payload, userId, requestMeta) {
++    const current = await buildingRepository.getById(societyId, buildingId);
++    if (!current) throw new ApiError(404, 'Building not found in the selected society');
++    const buildingCode = normalizeCode(payload.building_code);
++    if (await buildingRepository.findByCode(societyId, buildingCode, buildingId)) {
++      throw new ApiError(409, 'Building code already exists in this society');
++    }
++    const wings = normalizeWings(payload.wings);
++    if (new Set(wings.map((wing) => wing.wing_code)).size !== wings.length) {
++      throw new ApiError(400, 'Wing codes must be unique within a building');
++    }
++    const updated = await buildingRepository.update(societyId, buildingId, {
++      ...payload,
++      building_code: buildingCode,
++      building_name: payload.building_name.trim(),
++    }, wings, userId);
++    await this.audit('update', societyId, userId, updated, current, requestMeta);
++    return updated;
++  }
++
++  async remove(societyId, buildingId, userId, requestMeta) {
++    const current = await buildingRepository.getById(societyId, buildingId);
++    if (!current) throw new ApiError(404, 'Building not found in the selected society');
++    await buildingRepository.softDelete(societyId, buildingId, userId);
++    await this.audit('delete', societyId, userId, null, current, requestMeta);
++  }
++
++  async audit(action, societyId, userId, newData, oldData, requestMeta) {
++    await auditRepository.log({
++      societyId, userId, moduleName: 'buildings', action,
++      recordId: newData?.id ?? oldData?.id, oldData, newData,
++      ipAddress: requestMeta.ipAddress, userAgent: requestMeta.userAgent,
++    });
++  }
++}
++
++export default new BuildingService();
+diff --git a/backend/src/services/society-profile.service.js b/backend/src/services/society-profile.service.js
+index c07d3b1..e75c493 100644
+--- a/backend/src/services/society-profile.service.js
++++ b/backend/src/services/society-profile.service.js
+@@ -2,8 +2,9 @@ import SocietyRepository from '../repositories/society.repository.js';
+ import auditRepository from '../repositories/audit.repository.js';
+ import { ApiError } from '../utils/api-error.js';
+ import { normalizeEmail, normalizeMobile } from '../utils/normalize.js';
++import buildingRepository from '../repositories/building.repository.js';
+ 
+-const toSafeProfile = (society) => ({
++const toSafeProfile = (society, buildingCount = society.buildings ?? 0) => ({
+   id: society.id,
+   society_code: society.society_code,
+   society_name: society.society_name,
+@@ -18,7 +19,7 @@ const toSafeProfile = (society) => ({
+   mobile: society.mobile,
+   logo: society.logo,
+   established_date: society.established_date,
+-  buildings: society.buildings ?? 0,
++  buildings: buildingCount,
+   flats: society.flats ?? 0,
+   total_members: society.total_members ?? 0,
+   status: society.status,
+@@ -28,7 +29,7 @@ class SocietyProfileService {
+   async get(societyId) {
+     const society = await SocietyRepository.getById(societyId);
+     if (!society || society.status !== 'ACTIVE') throw new ApiError(404, 'Active society not found');
+-    return toSafeProfile(society);
++    return toSafeProfile(society, await buildingRepository.count(societyId));
+   }
+ 
+   async update(societyId, payload, userId, ipAddress, userAgent) {
+@@ -42,14 +43,15 @@ class SocietyProfileService {
+       mobile: payload.mobile ? normalizeMobile(payload.mobile) : null,
+     }, userId);
+ 
+-    const safeUpdated = toSafeProfile(updated);
++    const buildingCount = await buildingRepository.count(societyId);
++    const safeUpdated = toSafeProfile(updated, buildingCount);
+     await auditRepository.log({
+       societyId,
+       userId,
+       moduleName: 'society_profile',
+       action: 'update',
+       recordId: societyId,
+-      oldData: toSafeProfile(current),
++      oldData: toSafeProfile(current, buildingCount),
+       newData: safeUpdated,
+       ipAddress,
+       userAgent,
+diff --git a/backend/src/validators/building.validators.js b/backend/src/validators/building.validators.js
+new file mode 100644
+index 0000000..99c40d4
+--- /dev/null
++++ b/backend/src/validators/building.validators.js
+@@ -0,0 +1,13 @@
++import { body, param } from 'express-validator';
++
++export const validateBuildingId = [param('id').isInt({ min: 1 }).withMessage('Building ID must be a positive integer')];
++
++export const validateBuilding = [
++  body('building_code').trim().notEmpty().withMessage('Building code is required').isLength({ max: 50 }).matches(/^[A-Za-z0-9 _-]+$/),
++  body('building_name').trim().notEmpty().withMessage('Building name is required').isLength({ max: 150 }),
++  body('floors_per_wing').isInt({ min: 1, max: 200 }).withMessage('Floors per wing must be between 1 and 200'),
++  body('flats_per_floor').isInt({ min: 1, max: 100 }).withMessage('Flats per floor must be between 1 and 100'),
++  body('wings').isArray({ min: 1, max: 20 }).withMessage('Add between 1 and 20 wings'),
++  body('wings.*.wing_code').trim().notEmpty().withMessage('Wing code is required').isLength({ max: 50 }).matches(/^[A-Za-z0-9 _-]+$/),
++  body('wings.*.wing_name').trim().notEmpty().withMessage('Wing name is required').isLength({ max: 100 }),
++];
+diff --git a/src/app/(app)/society/buildings/page.tsx b/src/app/(app)/society/buildings/page.tsx
+index cbd5d24..fdd1a1d 100644
+--- a/src/app/(app)/society/buildings/page.tsx
++++ b/src/app/(app)/society/buildings/page.tsx
+@@ -1,86 +1,166 @@
+ "use client";
+ 
+-import { useState } from "react";
+-import { Plus, Eye, Pencil, Trash2, Building2 } from "lucide-react";
++import { FormEvent, useCallback, useEffect, useState } from "react";
++import { Building2, Pencil, Plus, Trash2 } from "lucide-react";
+ import { PageHeader } from "@/components/layout/PageHeader";
+ import { Card } from "@/components/ui/Card";
+ import { Button } from "@/components/ui/Button";
+-import { DataTable, Column } from "@/components/ui/DataTable";
++import { Column, DataTable } from "@/components/ui/DataTable";
+ import { Drawer } from "@/components/ui/Drawer";
+-import { Input, Select } from "@/components/ui/Input";
+-import { buildings } from "@/lib/mock-data";
+-import { Building } from "@/types";
++import { Input } from "@/components/ui/Input";
++import { StatusBadge } from "@/components/ui/Badge";
++import { getSocietySession } from "@/lib/session";
++
++const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:5000/api/v1";
++
++type Wing = { id?: number; wing_code: string; wing_name: string };
++type Building = {
++  id: number; building_code: string; building_name: string; floors_per_wing: number;
++  flats_per_floor: number; total_floors: number; total_flats: number;
++  status: string; wings: Wing[];
++};
++type BuildingForm = {
++  building_code: string; building_name: string; wing_names: string;
++  floors_per_wing: string; flats_per_floor: string;
++};
++
++const EMPTY_FORM: BuildingForm = {
++  building_code: "", building_name: "", wing_names: "",
++  floors_per_wing: "", flats_per_floor: "",
++};
+ 
+ export default function BuildingsPage() {
++  const [buildings, setBuildings] = useState<Building[]>([]);
++  const [form, setForm] = useState<BuildingForm>(EMPTY_FORM);
++  const [editing, setEditing] = useState<Building | null>(null);
+   const [drawerOpen, setDrawerOpen] = useState(false);
++  const [loading, setLoading] = useState(true);
++  const [saving, setSaving] = useState(false);
++  const [deletingId, setDeletingId] = useState<number | null>(null);
++  const [error, setError] = useState("");
++  const [success, setSuccess] = useState("");
++
++  const loadBuildings = useCallback(async () => {
++    const session = getSocietySession();
++    if (!session?.accessToken || !session.activeSociety) {
++      setError("Please select a society before managing buildings.");
++      setLoading(false);
++      return;
++    }
++    try {
++      const response = await fetch(`${API_URL}/society/buildings`, {
++        headers: { Authorization: `Bearer ${session.accessToken}` },
++      });
++      const result = await response.json();
++      if (!response.ok || !result.success) throw new Error(result.message || "Unable to load buildings.");
++      setBuildings(result.data ?? []);
++    } catch (loadError) {
++      setError(loadError instanceof Error ? loadError.message : "Unable to load buildings.");
++    } finally {
++      setLoading(false);
++    }
++  }, []);
++
++  useEffect(() => { void loadBuildings(); }, [loadBuildings]);
++
++  const openCreate = () => {
++    setEditing(null); setForm(EMPTY_FORM); setError(""); setSuccess(""); setDrawerOpen(true);
++  };
++  const openEdit = (building: Building) => {
++    setEditing(building);
++    setForm({
++      building_code: building.building_code,
++      building_name: building.building_name,
++      wing_names: building.wings.map((wing) => wing.wing_name).join(", "),
++      floors_per_wing: String(building.floors_per_wing),
++      flats_per_floor: String(building.flats_per_floor),
++    });
++    setError(""); setSuccess(""); setDrawerOpen(true);
++  };
++
++  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
++    event.preventDefault();
++    const session = getSocietySession();
++    if (!session?.accessToken) return setError("Your session is missing. Please login again.");
++    const wingNames = form.wing_names.split(",").map((name) => name.trim()).filter(Boolean);
++    if (!wingNames.length) return setError("Add at least one wing, for example: A, B");
++
++    setSaving(true); setError(""); setSuccess("");
++    try {
++      const response = await fetch(`${API_URL}/society/buildings${editing ? `/${editing.id}` : ""}`, {
++        method: editing ? "PUT" : "POST",
++        headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.accessToken}` },
++        body: JSON.stringify({
++          building_code: form.building_code,
++          building_name: form.building_name,
++          floors_per_wing: Number(form.floors_per_wing),
++          flats_per_floor: Number(form.flats_per_floor),
++          wings: wingNames.map((name) => ({
++            wing_code: name.toUpperCase().replace(/\s+/g, "-"), wing_name: name,
++          })),
++        }),
++      });
++      const result = await response.json();
++      if (!response.ok || !result.success) {
++        const validationMessage = Array.isArray(result.errors) ? result.errors.join(", ") : "";
++        throw new Error(validationMessage || result.message || "Unable to save building.");
++      }
++      setDrawerOpen(false); setEditing(null); setForm(EMPTY_FORM);
++      setSuccess(editing ? "Building updated successfully." : "Building created successfully.");
++      await loadBuildings();
++    } catch (saveError) {
++      setError(saveError instanceof Error ? saveError.message : "Unable to save building.");
++    } finally { setSaving(false); }
++  }
++
++  async function handleDelete(building: Building) {
++    if (!window.confirm(`Delete ${building.building_name} and its wings?`)) return;
++    const session = getSocietySession();
++    if (!session?.accessToken) return setError("Your session is missing. Please login again.");
++    setDeletingId(building.id); setError(""); setSuccess("");
++    try {
++      const response = await fetch(`${API_URL}/society/buildings/${building.id}`, {
++        method: "DELETE", headers: { Authorization: `Bearer ${session.accessToken}` },
++      });
++      const result = await response.json();
++      if (!response.ok || !result.success) throw new Error(result.message || "Unable to delete building.");
++      setSuccess("Building deleted successfully.");
++      await loadBuildings();
++    } catch (deleteError) {
++      setError(deleteError instanceof Error ? deleteError.message : "Unable to delete building.");
++    } finally { setDeletingId(null); }
++  }
+ 
+   const columns: Column<Building>[] = [
+-    {
+-      key: "name",
+-      header: "Building Name",
+-      render: (b) => (
+-        <span className="flex items-center gap-2 font-medium">
+-          <Building2 className="h-4 w-4 text-[var(--color-text-muted)]" /> {b.name}
+-        </span>
+-      ),
+-    },
+-    { key: "wings", header: "Wings", render: (b) => b.wings.join(", ") },
+-    { key: "totalFloors", header: "Total Floors" },
+-    { key: "totalFlats", header: "Total Flats" },
++    { key: "building_name", header: "Building", render: (building) => <span className="flex items-center gap-2 font-medium"><Building2 className="h-4 w-4 text-[var(--color-text-muted)]" />{building.building_name}<span className="text-xs text-[var(--color-text-muted)]">({building.building_code})</span></span> },
++    { key: "wings", header: "Wings", render: (building) => building.wings.map((wing) => wing.wing_name).join(", ") },
++    { key: "floors_per_wing", header: "Floors / Wing" },
++    { key: "flats_per_floor", header: "Flats / Floor" },
++    { key: "total_flats", header: "Expected Flats" },
++    { key: "status", header: "Status", render: (building) => <StatusBadge status={building.status === "ACTIVE" ? "Active" : "Inactive"} /> },
+   ];
+ 
+   return (
+     <div>
+-      <PageHeader
+-        title="Buildings / Wings"
+-        description="Manage building and wing structure for your society"
+-        actions={
+-          <Button onClick={() => setDrawerOpen(true)}>
+-            <Plus className="h-4 w-4" /> Add Building
+-          </Button>
+-        }
+-      />
+-
++      <PageHeader title="Buildings / Wings" description="Manage the building and wing structure of the selected society." actions={<Button onClick={openCreate}><Plus className="h-4 w-4" /> Add Building</Button>} />
++      {error && <p className="mb-4 rounded-[var(--radius-md)] bg-[var(--color-danger)]/10 px-4 py-3 text-sm text-[var(--color-danger)]">{error}</p>}
++      {success && <p className="mb-4 rounded-[var(--radius-md)] bg-[var(--color-success-bg)] px-4 py-3 text-sm text-[var(--color-success)]">{success}</p>}
+       <Card>
+-        <DataTable
+-          columns={columns}
+-          data={buildings}
+-          keyField="id"
+-          searchPlaceholder="Search buildings..."
+-          rowActions={[
+-            { label: "View Details", icon: <Eye className="h-4 w-4" />, onClick: () => {} },
+-            { label: "Edit", icon: <Pencil className="h-4 w-4" />, onClick: () => setDrawerOpen(true) },
+-            { label: "Delete", icon: <Trash2 className="h-4 w-4" />, onClick: () => {}, danger: true },
+-          ]}
+-          onExport={() => {}}
+-        />
++        <DataTable columns={columns} data={buildings} keyField="id" searchFields={["building_name", "building_code"]} searchPlaceholder={loading ? "Loading buildings..." : "Search buildings..."} rowActions={[
++          { label: "Edit", icon: <Pencil className="h-4 w-4" />, onClick: openEdit },
++          { label: deletingId ? "Deleting..." : "Delete", icon: <Trash2 className="h-4 w-4" />, onClick: (building) => void handleDelete(building), danger: true },
++        ]} />
+       </Card>
+ 
+-      <Drawer
+-        open={drawerOpen}
+-        onClose={() => setDrawerOpen(false)}
+-        title="Add Building / Wing"
+-        description="Create a new building or wing under this society"
+-        footer={
+-          <>
+-            <Button variant="outline" onClick={() => setDrawerOpen(false)}>
+-              Cancel
+-            </Button>
+-            <Button onClick={() => setDrawerOpen(false)}>Save Building</Button>
+-          </>
+-        }
+-      >
+-        <div className="flex flex-col gap-4">
+-          <Input label="Building Name" placeholder="e.g. Sunrise Tower C" required />
+-          <Input label="Number of Wings" type="number" placeholder="e.g. 2" required />
+-          <Input label="Total Floors" type="number" placeholder="e.g. 14" required />
+-          <Input label="Flats per Floor" type="number" placeholder="e.g. 4" required />
+-          <Select
+-            label="Society"
+-            options={[{ label: "Green Valley Co-operative Housing Society", value: "SOC001" }]}
+-            defaultValue="SOC001"
+-          />
+-        </div>
++      <Drawer open={drawerOpen} onClose={() => !saving && setDrawerOpen(false)} title={editing ? "Edit Building / Wings" : "Add Building / Wings"} description="Wings must be unique within this building." footer={<><Button variant="outline" onClick={() => setDrawerOpen(false)} disabled={saving}>Cancel</Button><Button type="submit" form="building-form" loading={saving}>{editing ? "Update Building" : "Save Building"}</Button></>}>
++        <form id="building-form" onSubmit={handleSubmit} className="flex flex-col gap-4">
++          <Input label="Building Code" required placeholder="e.g. BLD-A" value={form.building_code} onChange={(e) => setForm((current) => ({ ...current, building_code: e.target.value.toUpperCase() }))} />
++          <Input label="Building Name" required placeholder="e.g. Sunrise Tower" value={form.building_name} onChange={(e) => setForm((current) => ({ ...current, building_name: e.target.value }))} />
++          <Input label="Wings" required placeholder="e.g. A, B, C" helpText="Enter wing names separated by commas." value={form.wing_names} onChange={(e) => setForm((current) => ({ ...current, wing_names: e.target.value }))} />
++          <Input label="Floors per Wing" type="number" min={1} max={200} required value={form.floors_per_wing} onChange={(e) => setForm((current) => ({ ...current, floors_per_wing: e.target.value }))} />
++          <Input label="Flats per Floor" type="number" min={1} max={100} required value={form.flats_per_floor} onChange={(e) => setForm((current) => ({ ...current, flats_per_floor: e.target.value }))} />
++          {form.wing_names && form.floors_per_wing && form.flats_per_floor && <p className="rounded-[var(--radius-md)] bg-[var(--color-bg)] px-3 py-2 text-xs text-[var(--color-text-secondary)]">Expected flats: {form.wing_names.split(",").filter((name) => name.trim()).length * Number(form.floors_per_wing) * Number(form.flats_per_floor)}</p>}
++        </form>
+       </Drawer>
+     </div>
+   );
+-- 
+2.51.1
+

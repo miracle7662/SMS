@@ -1,11 +1,5 @@
-import { PageHeader } from "@/components/layout/PageHeader";
-import { MembersByType } from "@/components/modules/MembersByType";
+import { SocietyMembers } from "@/components/modules/SocietyMembers";
 
 export default function CoOwnersPage() {
-  return (
-    <div>
-      <PageHeader title="Co-Owners" description="Joint / co-owners registered against flats" />
-      <MembersByType type="Co-Owner" />
-    </div>
-  );
+  return <SocietyMembers type="CO_OWNER" title="Co-Owners" />;
 }

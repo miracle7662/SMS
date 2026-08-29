@@ -1,0 +1,448 @@
+From 6a271a44a1236035e94dc26b6d4352fe8f210a76 Mon Sep 17 00:00:00 2001
+From: Codex <codex@openai.com>
+Date: Sat, 29 Aug 2026 16:02:22 +0000
+Subject: [PATCH] feat(users): assign society administrators
+
+---
+ .../controllers/society-user.controller.js    |   8 +
+ .../repositories/society-user.repository.js   | 111 ++++++++++++
+ backend/src/routes/index.js                   |   2 +
+ backend/src/routes/society-user.routes.js     |  14 ++
+ backend/src/services/society-user.service.js  |  52 ++++++
+ .../src/validators/society-user.validators.js |  10 ++
+ src/app/(app)/users/page.tsx                  | 161 +++++++++++++-----
+ 7 files changed, 314 insertions(+), 44 deletions(-)
+ create mode 100644 backend/src/controllers/society-user.controller.js
+ create mode 100644 backend/src/repositories/society-user.repository.js
+ create mode 100644 backend/src/routes/society-user.routes.js
+ create mode 100644 backend/src/services/society-user.service.js
+ create mode 100644 backend/src/validators/society-user.validators.js
+
+diff --git a/backend/src/controllers/society-user.controller.js b/backend/src/controllers/society-user.controller.js
+new file mode 100644
+index 0000000..56db843
+--- /dev/null
++++ b/backend/src/controllers/society-user.controller.js
+@@ -0,0 +1,8 @@
++import societyUserService from '../services/society-user.service.js';
++import { asyncHandler } from '../utils/async-handler.js';
++import { sendSuccess } from '../utils/api-response.js';
++
++const requestMeta = (req) => ({ ipAddress: req.ip, userAgent: req.get('user-agent') });
++export const listSocietyUsers = asyncHandler(async (req, res) => sendSuccess(res, 200, 'Society users fetched successfully', await societyUserService.list(req.auth.activeSocietyId)));
++export const createSocietyAdmin = asyncHandler(async (req, res) => sendSuccess(res, 201, 'Society Admin assigned successfully', await societyUserService.createSocietyAdmin(req.auth.activeSocietyId, req.body, req.auth.userId, requestMeta(req))));
++export const updateSocietyUserAccess = asyncHandler(async (req, res) => sendSuccess(res, 200, 'Society user access updated successfully', await societyUserService.setAccessStatus(req.auth.activeSocietyId, Number(req.params.id), req.body.status, req.auth.userId, requestMeta(req))));
+diff --git a/backend/src/repositories/society-user.repository.js b/backend/src/repositories/society-user.repository.js
+new file mode 100644
+index 0000000..b92f8fd
+--- /dev/null
++++ b/backend/src/repositories/society-user.repository.js
+@@ -0,0 +1,111 @@
++import { getPool } from '../config/database.js';
++
++class SocietyUserRepository {
++  async list(societyId) {
++    const [rows] = await getPool().execute(
++      `SELECT u.id, u.name, u.mobile, u.email, u.profile_image, u.last_login,
++              us.status AS access_status, us.is_default, us.joined_at,
++              GROUP_CONCAT(DISTINCT r.role_code ORDER BY r.role_code SEPARATOR ',') AS role_codes
++       FROM user_societies us
++       INNER JOIN users u ON u.id = us.user_id AND u.deleted_at IS NULL
++       LEFT JOIN user_roles ur ON ur.user_id = u.id AND ur.society_id = us.society_id
++       LEFT JOIN roles r ON r.id = ur.role_id AND r.status = 'ACTIVE'
++       WHERE us.society_id = ?
++       GROUP BY u.id, u.name, u.mobile, u.email, u.profile_image, u.last_login,
++                us.status, us.is_default, us.joined_at
++       ORDER BY us.status = 'ACTIVE' DESC, u.name ASC`,
++      [societyId]
++    );
++    return rows.map((row) => ({ ...row, roles: row.role_codes ? row.role_codes.split(',') : [] }));
++  }
++
++  async getById(societyId, userId) {
++    const users = await this.list(societyId);
++    return users.find((user) => Number(user.id) === Number(userId)) || null;
++  }
++
++  async findUserByMobile(mobile) {
++    const [rows] = await getPool().execute(
++      `SELECT id, name, mobile, email, status, deleted_at FROM users WHERE mobile = ? LIMIT 1`,
++      [mobile]
++    );
++    return rows[0] || null;
++  }
++
++  async findUserByEmail(email) {
++    if (!email) return null;
++    const [rows] = await getPool().execute(
++      `SELECT id FROM users WHERE email = ? LIMIT 1`, [email]
++    );
++    return rows[0] || null;
++  }
++
++  async assignSocietyAdmin(societyId, identity, passwordHash, createdBy) {
++    const connection = await getPool().getConnection();
++    try {
++      await connection.beginTransaction();
++      let [users] = await connection.execute(
++        `SELECT id, name, mobile, email, status, deleted_at FROM users WHERE mobile = ? FOR UPDATE`,
++        [identity.mobile]
++      );
++      let user = users[0];
++      let created = false;
++      if (!user) {
++        const [result] = await connection.execute(
++          `INSERT INTO users (name, mobile, email, password_hash, status, created_by, updated_by, password_changed_at)
++           VALUES (?, ?, ?, ?, 'ACTIVE', ?, ?, UTC_TIMESTAMP())`,
++          [identity.name, identity.mobile, identity.email, passwordHash, createdBy, createdBy]
++        );
++        user = { id: result.insertId, name: identity.name, mobile: identity.mobile, email: identity.email, status: 'ACTIVE' };
++        created = true;
++      }
++
++      const [assignmentCount] = await connection.execute(
++        `SELECT COUNT(*) AS total FROM user_societies WHERE user_id = ? AND status = 'ACTIVE'`, [user.id]
++      );
++      const isDefault = Number(assignmentCount[0].total) === 0;
++      await connection.execute(
++        `INSERT INTO user_societies (user_id, society_id, is_default, status, joined_at, created_by)
++         VALUES (?, ?, ?, 'ACTIVE', UTC_TIMESTAMP(), ?)
++         ON DUPLICATE KEY UPDATE status = 'ACTIVE', joined_at = COALESCE(joined_at, UTC_TIMESTAMP())`,
++        [user.id, societyId, isDefault, createdBy]
++      );
++      const [roles] = await connection.execute(
++        `SELECT id FROM roles WHERE role_code = 'SOCIETY_ADMIN' AND scope = 'SOCIETY' AND status = 'ACTIVE' LIMIT 1`
++      );
++      if (!roles[0]) throw new Error('SOCIETY_ADMIN role is not configured');
++      await connection.execute(
++        `INSERT INTO user_roles (user_id, role_id, society_id, created_by)
++         VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE created_by = created_by`,
++        [user.id, roles[0].id, societyId, createdBy]
++      );
++      await connection.commit();
++      return { userId: user.id, created };
++    } catch (error) {
++      await connection.rollback();
++      throw error;
++    } finally { connection.release(); }
++  }
++
++  async setAccessStatus(societyId, userId, status) {
++    const [result] = await getPool().execute(
++      `UPDATE user_societies SET status = ? WHERE society_id = ? AND user_id = ?`,
++      [status, societyId, userId]
++    );
++    return result.affectedRows > 0;
++  }
++
++  async countActiveSocietyAdmins(societyId) {
++    const [rows] = await getPool().execute(
++      `SELECT COUNT(DISTINCT us.user_id) AS total
++       FROM user_societies us
++       INNER JOIN user_roles ur ON ur.user_id = us.user_id AND ur.society_id = us.society_id
++       INNER JOIN roles r ON r.id = ur.role_id AND r.role_code = 'SOCIETY_ADMIN'
++       WHERE us.society_id = ? AND us.status = 'ACTIVE'`,
++      [societyId]
++    );
++    return Number(rows[0]?.total ?? 0);
++  }
++}
++
++export default new SocietyUserRepository();
+diff --git a/backend/src/routes/index.js b/backend/src/routes/index.js
+index a0f8beb..d43df21 100644
+--- a/backend/src/routes/index.js
++++ b/backend/src/routes/index.js
+@@ -6,6 +6,7 @@ import societyProfileRoutes from './society-profile.routes.js';
+ import buildingRoutes from './building.routes.js';
+ import floorRoutes from './floor.routes.js';
+ import flatRoutes from './flat.routes.js';
++import societyUserRoutes from './society-user.routes.js';
+ 
+ const router = express.Router();
+ 
+@@ -18,6 +19,7 @@ router.use('/platform', platformRoutes);
+ router.use('/society/buildings', buildingRoutes);
+ router.use('/society/floors', floorRoutes);
+ router.use('/society/flats', flatRoutes);
++router.use('/society/users', societyUserRoutes);
+ router.use('/society', societyProfileRoutes);
+ 
+ export default router;
+diff --git a/backend/src/routes/society-user.routes.js b/backend/src/routes/society-user.routes.js
+new file mode 100644
+index 0000000..2af1168
+--- /dev/null
++++ b/backend/src/routes/society-user.routes.js
+@@ -0,0 +1,14 @@
++import express from 'express';
++import { createSocietyAdmin, listSocietyUsers, updateSocietyUserAccess } from '../controllers/society-user.controller.js';
++import { authenticate } from '../middleware/authenticate.middleware.js';
++import { authorizePermissions, requireActiveSociety } from '../middleware/authorize.middleware.js';
++import { handleValidationErrors } from '../validators/auth.validators.js';
++import { validateAccessStatus, validateCreateSocietyAdmin, validateSocietyUserId } from '../validators/society-user.validators.js';
++
++const router = express.Router();
++router.use(authenticate, requireActiveSociety);
++router.get('/', authorizePermissions('society.users.view'), listSocietyUsers);
++router.post('/society-admin', authorizePermissions('society.users.create'), validateCreateSocietyAdmin, handleValidationErrors, createSocietyAdmin);
++router.patch('/:id/access', authorizePermissions('society.users.update'), validateSocietyUserId, validateAccessStatus, handleValidationErrors, updateSocietyUserAccess);
++
++export default router;
+diff --git a/backend/src/services/society-user.service.js b/backend/src/services/society-user.service.js
+new file mode 100644
+index 0000000..a43b73f
+--- /dev/null
++++ b/backend/src/services/society-user.service.js
+@@ -0,0 +1,52 @@
++import societyUserRepository from '../repositories/society-user.repository.js';
++import auditRepository from '../repositories/audit.repository.js';
++import { hashPassword } from '../utils/password-utils.js';
++import { normalizeEmail, normalizeMobile } from '../utils/normalize.js';
++import { ApiError } from '../utils/api-error.js';
++
++class SocietyUserService {
++  list(societyId) { return societyUserRepository.list(societyId); }
++
++  async createSocietyAdmin(societyId, payload, createdBy, requestMeta) {
++    const mobile = normalizeMobile(payload.mobile);
++    const email = payload.email ? normalizeEmail(payload.email) : null;
++    const existing = await societyUserRepository.findUserByMobile(mobile);
++    if (existing?.deleted_at) throw new ApiError(409, 'This mobile belongs to a deleted user account');
++    if (existing && existing.status !== 'ACTIVE') throw new ApiError(409, 'This mobile belongs to an inactive or blocked user account');
++    if (!existing && email && await societyUserRepository.findUserByEmail(email)) {
++      throw new ApiError(409, 'Email address is already used by another user');
++    }
++
++    const passwordHash = existing ? null : await hashPassword(payload.password);
++    const assignment = await societyUserRepository.assignSocietyAdmin(societyId, {
++      name: payload.name.trim(), mobile, email,
++    }, passwordHash, createdBy);
++    const user = await societyUserRepository.getById(societyId, assignment.userId);
++    await auditRepository.log({
++      societyId, userId: createdBy, moduleName: 'society_users', action: 'assign_society_admin',
++      recordId: assignment.userId, newData: { assigned_user_id: assignment.userId, account_created: assignment.created },
++      ipAddress: requestMeta.ipAddress, userAgent: requestMeta.userAgent,
++    });
++    return { user, account_created: assignment.created, existing_account_assigned: !assignment.created };
++  }
++
++  async setAccessStatus(societyId, targetUserId, status, actingUserId, requestMeta) {
++    const current = await societyUserRepository.getById(societyId, targetUserId);
++    if (!current) throw new ApiError(404, 'User does not belong to the selected society');
++    if (Number(targetUserId) === Number(actingUserId) && status === 'INACTIVE') {
++      throw new ApiError(400, 'You cannot deactivate your own society access');
++    }
++    if (status === 'INACTIVE' && current.roles.includes('SOCIETY_ADMIN') && await societyUserRepository.countActiveSocietyAdmins(societyId) <= 1) {
++      throw new ApiError(409, 'Assign another Society Admin before deactivating the last active admin');
++    }
++    await societyUserRepository.setAccessStatus(societyId, targetUserId, status);
++    await auditRepository.log({
++      societyId, userId: actingUserId, moduleName: 'society_users', action: status === 'ACTIVE' ? 'activate_access' : 'deactivate_access',
++      recordId: targetUserId, oldData: { access_status: current.access_status }, newData: { access_status: status },
++      ipAddress: requestMeta.ipAddress, userAgent: requestMeta.userAgent,
++    });
++    return societyUserRepository.getById(societyId, targetUserId);
++  }
++}
++
++export default new SocietyUserService();
+diff --git a/backend/src/validators/society-user.validators.js b/backend/src/validators/society-user.validators.js
+new file mode 100644
+index 0000000..1f579b4
+--- /dev/null
++++ b/backend/src/validators/society-user.validators.js
+@@ -0,0 +1,10 @@
++import { body, param } from 'express-validator';
++
++export const validateCreateSocietyAdmin = [
++  body('name').trim().notEmpty().withMessage('Full name is required').isLength({ max: 150 }),
++  body('mobile').trim().notEmpty().withMessage('Mobile number is required').isLength({ min: 10, max: 20 }),
++  body('email').optional({ checkFalsy: true }).trim().isEmail().withMessage('Enter a valid email address').isLength({ max: 150 }),
++  body('password').isString().isLength({ min: 8, max: 72 }).withMessage('Password must contain 8 to 72 characters'),
++];
++export const validateSocietyUserId = [param('id').isInt({ min: 1 }).withMessage('User ID must be a positive integer')];
++export const validateAccessStatus = [body('status').isIn(['ACTIVE','INACTIVE']).withMessage('Access status must be ACTIVE or INACTIVE')];
+diff --git a/src/app/(app)/users/page.tsx b/src/app/(app)/users/page.tsx
+index 4a291e5..477cdfe 100644
+--- a/src/app/(app)/users/page.tsx
++++ b/src/app/(app)/users/page.tsx
+@@ -1,58 +1,131 @@
+ "use client";
+ 
+-import { useState } from "react";
+-import { Plus, Pencil, Trash2, Shield } from "lucide-react";
++import { FormEvent, useCallback, useEffect, useState } from "react";
++import { Plus, Shield, UserCheck } from "lucide-react";
+ import { PageHeader } from "@/components/layout/PageHeader";
+ import { Card } from "@/components/ui/Card";
+ import { Button } from "@/components/ui/Button";
+-import { DataTable, Column } from "@/components/ui/DataTable";
+-import { StatusBadge, Badge } from "@/components/ui/Badge";
++import { Column, DataTable } from "@/components/ui/DataTable";
++import { Badge, StatusBadge } from "@/components/ui/Badge";
+ import { Drawer } from "@/components/ui/Drawer";
+-import { Input, Select } from "@/components/ui/Input";
+-import { users } from "@/lib/mock-data";
+-import { User } from "@/types";
+-import { initials, formatDateTime } from "@/lib/utils";
++import { Input } from "@/components/ui/Input";
++import { formatDateTime, initials } from "@/lib/utils";
++import { getSocietySession } from "@/lib/session";
++
++const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:5000/api/v1";
++
++type SocietyUser = {
++  id: number; name: string; mobile: string; email: string | null;
++  last_login: string | null; access_status: "ACTIVE" | "INACTIVE";
++  joined_at: string | null; roles: string[];
++};
+ 
+ export default function UsersPage() {
++  const [users, setUsers] = useState<SocietyUser[]>([]);
+   const [drawerOpen, setDrawerOpen] = useState(false);
+-  const columns: Column<User>[] = [
+-    { key: "name", header: "Name", render: (u) => (
+-      <span className="flex items-center gap-2.5">
+-        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[var(--color-primary)]/10 text-xs font-semibold text-[var(--color-primary)]">{initials(u.name)}</span>
+-        <span className="font-medium text-[var(--color-text)]">{u.name}</span>
+-      </span>
+-    ) },
+-    { key: "email", header: "Email" },
++  const [name, setName] = useState("");
++  const [mobile, setMobile] = useState("");
++  const [email, setEmail] = useState("");
++  const [password, setPassword] = useState("");
++  const [loading, setLoading] = useState(true);
++  const [saving, setSaving] = useState(false);
++  const [changingId, setChangingId] = useState<number | null>(null);
++  const [error, setError] = useState("");
++  const [success, setSuccess] = useState("");
++
++  const loadUsers = useCallback(async () => {
++    const session = getSocietySession();
++    if (!session?.accessToken || !session.activeSociety) {
++      setError("Please select a society before managing its users."); setLoading(false); return;
++    }
++    try {
++      const response = await fetch(`${API_URL}/society/users`, { headers: { Authorization: `Bearer ${session.accessToken}` } });
++      const result = await response.json();
++      if (!response.ok || !result.success) throw new Error(result.message || "Unable to load society users.");
++      setUsers(result.data ?? []);
++    } catch (loadError) { setError(loadError instanceof Error ? loadError.message : "Unable to load society users."); }
++    finally { setLoading(false); }
++  }, []);
++
++  useEffect(() => { void loadUsers(); }, [loadUsers]);
++
++  const openCreate = () => {
++    setName(""); setMobile(""); setEmail(""); setPassword("");
++    setError(""); setSuccess(""); setDrawerOpen(true);
++  };
++
++  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
++    event.preventDefault();
++    const session = getSocietySession();
++    if (!session?.accessToken) return setError("Your session is missing. Please login again.");
++    setSaving(true); setError(""); setSuccess("");
++    try {
++      const response = await fetch(`${API_URL}/society/users/society-admin`, {
++        method: "POST",
++        headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.accessToken}` },
++        body: JSON.stringify({ name, mobile, email: email || null, password }),
++      });
++      const result = await response.json();
++      if (!response.ok || !result.success) {
++        const validationMessage = Array.isArray(result.errors) ? result.errors.join(", ") : "";
++        throw new Error(validationMessage || result.message || "Unable to assign Society Admin.");
++      }
++      setDrawerOpen(false); setPassword("");
++      setSuccess(result.data?.account_created
++        ? "New Society Admin account created and assigned successfully."
++        : "Existing user account assigned as Society Admin. Existing password remains unchanged.");
++      await loadUsers();
++    } catch (saveError) { setError(saveError instanceof Error ? saveError.message : "Unable to assign Society Admin."); }
++    finally { setSaving(false); }
++  }
++
++  async function changeAccess(user: SocietyUser) {
++    const nextStatus = user.access_status === "ACTIVE" ? "INACTIVE" : "ACTIVE";
++    if (nextStatus === "INACTIVE" && !window.confirm(`Deactivate ${user.name}'s access to this society?`)) return;
++    const session = getSocietySession();
++    if (!session?.accessToken) return setError("Your session is missing. Please login again.");
++    setChangingId(user.id); setError(""); setSuccess("");
++    try {
++      const response = await fetch(`${API_URL}/society/users/${user.id}/access`, {
++        method: "PATCH",
++        headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.accessToken}` },
++        body: JSON.stringify({ status: nextStatus }),
++      });
++      const result = await response.json();
++      if (!response.ok || !result.success) throw new Error(result.message || "Unable to update user access.");
++      setSuccess(`Society access ${nextStatus === "ACTIVE" ? "activated" : "deactivated"} successfully.`);
++      await loadUsers();
++    } catch (accessError) { setError(accessError instanceof Error ? accessError.message : "Unable to update user access."); }
++    finally { setChangingId(null); }
++  }
++
++  const columns: Column<SocietyUser>[] = [
++    { key: "name", header: "Name", render: (user) => <span className="flex items-center gap-2.5"><span className="flex h-8 w-8 items-center justify-center rounded-full bg-[var(--color-primary)]/10 text-xs font-semibold text-[var(--color-primary)]">{initials(user.name)}</span><span className="font-medium text-[var(--color-text)]">{user.name}</span></span> },
+     { key: "mobile", header: "Mobile" },
+-    { key: "role", header: "Role", render: (u) => <Badge><Shield className="mr-1 h-3 w-3" /> {u.role.replace("_", " ")}</Badge> },
+-    { key: "lastLogin", header: "Last Login", render: (u) => (u.lastLogin ? formatDateTime(u.lastLogin) : "—") },
+-    { key: "status", header: "Status", render: (u) => <StatusBadge status={u.status} /> },
++    { key: "email", header: "Email", render: (user) => user.email || "—" },
++    { key: "roles", header: "Roles", render: (user) => <span className="flex flex-wrap gap-1">{user.roles.map((role) => <Badge key={role}><Shield className="mr-1 h-3 w-3" />{role.replaceAll("_", " ")}</Badge>)}</span> },
++    { key: "last_login", header: "Last Login", render: (user) => user.last_login ? formatDateTime(user.last_login) : "Never" },
++    { key: "access_status", header: "Access", render: (user) => <StatusBadge status={user.access_status === "ACTIVE" ? "Active" : "Inactive"} /> },
+   ];
+ 
+-  return (
+-    <div>
+-      <PageHeader title="Users" description="Manage user accounts and access" actions={<Button onClick={() => setDrawerOpen(true)}><Plus className="h-4 w-4" /> Add User</Button>} />
+-      <Card>
+-        <DataTable
+-          columns={columns}
+-          data={users}
+-          keyField="id"
+-          searchPlaceholder="Search users..."
+-          filters={[{ key: "role", label: "Role", options: Array.from(new Set(users.map((u) => u.role))) }, { key: "status", label: "Status", options: ["Active", "Inactive"] }]}
+-          rowActions={[
+-            { label: "Edit", icon: <Pencil className="h-4 w-4" />, onClick: () => setDrawerOpen(true) },
+-            { label: "Deactivate", icon: <Trash2 className="h-4 w-4" />, onClick: () => {}, danger: true },
+-          ]}
+-        />
+-      </Card>
+-      <Drawer open={drawerOpen} onClose={() => setDrawerOpen(false)} title="Add User" footer={<><Button variant="outline" onClick={() => setDrawerOpen(false)}>Cancel</Button><Button onClick={() => setDrawerOpen(false)}>Save User</Button></>}>
+-        <div className="flex flex-col gap-4">
+-          <Input label="Full Name" required />
+-          <Input label="Email" type="email" required />
+-          <Input label="Mobile Number" required />
+-          <Select label="Role" required options={["SUPER_ADMIN", "SOCIETY_ADMIN", "CHAIRMAN", "SECRETARY", "TREASURER", "ACCOUNTANT", "SECURITY", "RESIDENT"].map((r) => ({ label: r.replace("_", " "), value: r }))} />
++  return <div>
++    <PageHeader title="Society Users" description="Create and manage administrators for the selected society." actions={<Button onClick={openCreate}><Plus className="h-4 w-4" /> Add Society Admin</Button>} />
++    {error && <p className="mb-4 rounded-[var(--radius-md)] bg-[var(--color-danger)]/10 px-4 py-3 text-sm text-[var(--color-danger)]">{error}</p>}
++    {success && <p className="mb-4 rounded-[var(--radius-md)] bg-[var(--color-success-bg)] px-4 py-3 text-sm text-[var(--color-success)]">{success}</p>}
++    <Card><DataTable columns={columns} data={users} keyField="id" searchFields={["name", "mobile", "email"]} searchPlaceholder={loading ? "Loading users..." : "Search society users..."} filters={[{ key: "access_status", label: "Access", options: ["ACTIVE", "INACTIVE"] }]} rowActions={[
++      { label: changingId ? "Updating..." : "Toggle Access", icon: <UserCheck className="h-4 w-4" />, onClick: (user) => void changeAccess(user), danger: false },
++    ]} /></Card>
++
++    <Drawer open={drawerOpen} onClose={() => !saving && setDrawerOpen(false)} title="Add Society Admin" description="Create a new account or assign an existing mobile-number account to this society." footer={<><Button variant="outline" onClick={() => setDrawerOpen(false)} disabled={saving}>Cancel</Button><Button type="submit" form="society-admin-form" loading={saving}>Assign Society Admin</Button></>}>
++      <form id="society-admin-form" onSubmit={handleSubmit} className="flex flex-col gap-4">
++        <Input label="Full Name" required value={name} onChange={(e) => setName(e.target.value)} />
++        <Input label="Mobile Number" required inputMode="tel" value={mobile} onChange={(e) => setMobile(e.target.value)} helpText="Mobile number is the primary login ID." />
++        <Input label="Email Address" type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
++        <Input label="Temporary Password" type="password" required minLength={8} maxLength={72} value={password} onChange={(e) => setPassword(e.target.value)} helpText="Used only for a new account. Existing users keep their current password." />
++        <div className="rounded-[var(--radius-md)] bg-[var(--color-bg)] px-3 py-3 text-xs text-[var(--color-text-secondary)]">
++          The user will receive SOCIETY_ADMIN access only for the currently selected society. This form cannot create a SUPER_ADMIN.
+         </div>
+-      </Drawer>
+-    </div>
+-  );
++      </form>
++    </Drawer>
++  </div>;
+ }
+-- 
+2.51.1
+

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Building2, CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Card, CardHeader, CardBody } from "@/components/ui/Card";
+import { saveActiveSociety } from "@/lib/session";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:5000/api/v1";
 
@@ -70,17 +71,15 @@ export default function SelectSocietyPage() {
 
   useEffect(() => {
     const initialize = async () => {
-      // Check if user is Super Admin
-      const userStr = localStorage.getItem("society_user") || sessionStorage.getItem("society_user");
-      let user = null;
       let isAdmin = false;
-      
-      if (userStr) {
+
+      const rolesStr = localStorage.getItem("society_platform_roles") || sessionStorage.getItem("society_platform_roles");
+      if (rolesStr) {
         try {
-          user = JSON.parse(userStr);
-          isAdmin = user.isSuperAdmin || false;
+          const roles = JSON.parse(rolesStr);
+          isAdmin = Array.isArray(roles) && roles.includes("SUPER_ADMIN");
           setIsSuperAdmin(isAdmin);
-        } catch (e) {
+        } catch {
           // Invalid user data
         }
       }
@@ -109,7 +108,7 @@ export default function SelectSocietyPage() {
         return;
       }
 
-      const response = await fetch(`${API_URL}/societies`, {
+      const response = await fetch(`${API_URL}/auth/societies`, {
         headers: {
           "Authorization": `Bearer ${token}`
         }
@@ -195,9 +194,9 @@ export default function SelectSocietyPage() {
         throw new Error(result.message || "Unable to select a society.");
       }
 
-      const nextAccessToken = result.data?.access_token ?? token;
-      storage.setItem("society_access_token", nextAccessToken);
-      storage.setItem("society_active", JSON.stringify(selectedSociety ?? { id: selectedSocietyId }));
+      const nextAccessToken = result.data?.access_token ?? result.data?.accessToken ?? token;
+      const activeSociety = result.data?.active_society ?? result.data?.activeSociety ?? selectedSociety ?? { id: selectedSocietyId };
+      saveActiveSociety(storage, activeSociety, nextAccessToken, result.data?.roles ?? []);
 
       router.push("/dashboard");
     } catch (submitError) {

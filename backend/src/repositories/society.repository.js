@@ -1,6 +1,44 @@
 import { getPool } from '../config/database.js';  // ✅ हे बरोबर आहे का?
 
 class SocietyRepository {
+  static async create(society, createdBy) {
+    const pool = getPool();
+    const [result] = await pool.execute(
+      `INSERT INTO societies (
+        society_code, society_name, registration_no, registration_type,
+        address, city, state, pincode, pan_number, email, mobile,
+        established_date, status, created_by, updated_by
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE', ?, ?)`,
+      [
+        society.society_code,
+        society.society_name,
+        society.registration_no || null,
+        society.registration_type || 'Co-operative Housing Society',
+        society.address || null,
+        society.city || null,
+        society.state || null,
+        society.pincode || null,
+        society.pan_number || null,
+        society.email || null,
+        society.mobile || null,
+        society.established_date || null,
+        createdBy,
+        createdBy,
+      ]
+    );
+
+    return this.getById(result.insertId);
+  }
+
+  static async findByCode(code) {
+    const pool = getPool();
+    const [rows] = await pool.execute(
+      `SELECT id FROM societies WHERE society_code = ? LIMIT 1`,
+      [code]
+    );
+    return rows[0] || null;
+  }
+
   static async getAllActive() {
     const pool = getPool();
     const [rows] = await pool.execute(`
@@ -10,6 +48,9 @@ class SocietyRepository {
         society_name,
         city,
         state,
+        email,
+        mobile,
+        created_at,
         status
       FROM societies 
       WHERE deleted_at IS NULL 
@@ -26,6 +67,34 @@ class SocietyRepository {
       [id]
     );
     return rows[0] || null;
+  }
+
+  static async updateProfile(id, profile, updatedBy) {
+    const pool = getPool();
+    await pool.execute(
+      `UPDATE societies
+       SET society_name = ?, registration_no = ?, registration_type = ?,
+           address = ?, city = ?, state = ?, pincode = ?, pan_number = ?,
+           email = ?, mobile = ?, logo = ?, established_date = ?, updated_by = ?
+       WHERE id = ? AND deleted_at IS NULL`,
+      [
+        profile.society_name,
+        profile.registration_no || null,
+        profile.registration_type || 'Co-operative Housing Society',
+        profile.address || null,
+        profile.city || null,
+        profile.state || null,
+        profile.pincode || null,
+        profile.pan_number || null,
+        profile.email || null,
+        profile.mobile || null,
+        profile.logo || null,
+        profile.established_date || null,
+        updatedBy,
+        id,
+      ]
+    );
+    return this.getById(id);
   }
 
   static async getMemberCount(societyId) {

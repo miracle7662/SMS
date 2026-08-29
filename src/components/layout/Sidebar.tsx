@@ -3,26 +3,31 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import { ChevronDown, ChevronsLeft, Building } from "lucide-react";
+import { ChevronDown, ChevronsLeft, Building, Building2 } from "lucide-react";
 import { NAV } from "@/lib/nav";
 import { ICON_MAP } from "./icon-map";
 import { cn } from "@/lib/utils";
 import { society } from "@/lib/mock-data";
 import { initials } from "@/lib/utils";
+import { SocietySession } from "@/lib/session";
 
 export function Sidebar({
   collapsed,
   onToggleCollapse,
   mobileOpen,
   onCloseMobile,
+  session,
 }: {
   collapsed: boolean;
   onToggleCollapse: () => void;
   mobileOpen: boolean;
   onCloseMobile: () => void;
+  session: SocietySession | null;
 }) {
   const pathname = usePathname();
   const [openGroups, setOpenGroups] = useState<Set<string>>(new Set());
+  const isSuperAdmin = session?.isSuperAdmin ?? false;
+  const activeSocietyName = session?.activeSociety?.name ?? session?.activeSociety?.society_name;
 
   useEffect(() => {
     // auto expand the group matching current path
@@ -65,7 +70,7 @@ export function Sidebar({
           {!collapsed && (
             <div className="min-w-0">
               <p className="truncate text-sm font-semibold text-[var(--color-text)]">SocietyOS</p>
-              <p className="truncate text-[11px] text-[var(--color-text-secondary)]">{society.name}</p>
+              <p className="truncate text-[11px] text-[var(--color-text-secondary)]">{activeSocietyName || (isSuperAdmin ? "Super Admin" : society.name)}</p>
             </div>
           )}
           <button
@@ -82,7 +87,25 @@ export function Sidebar({
         {/* Nav */}
         <nav className="scrollbar-none flex-1 overflow-y-auto px-2.5 py-3">
           <ul className="flex flex-col gap-0.5">
-            {NAV.map((item) => {
+            {isSuperAdmin && (
+              <li className="group relative">
+                <Link
+                  href="/super-admin/societies"
+                  onClick={onCloseMobile}
+                  className={cn(
+                    "flex items-center gap-3 rounded-[var(--radius-md)] px-3 py-2.5 text-sm font-medium transition-colors",
+                    pathname.startsWith("/super-admin/societies")
+                      ? "bg-[var(--color-primary)]/10 text-[var(--color-primary)]"
+                      : "text-[var(--color-text-secondary)] hover:bg-[var(--color-bg)] hover:text-[var(--color-text)]",
+                    collapsed && "lg:justify-center"
+                  )}
+                >
+                  <Building2 className="h-[18px] w-[18px] shrink-0" />
+                  {!collapsed && <span className="truncate">Manage Societies</span>}
+                </Link>
+              </li>
+            )}
+            {(!isSuperAdmin || session?.activeSociety) && NAV.map((item) => {
               const Icon = ICON_MAP[item.icon];
               const active = isActiveParent(item.href);
               const isOpen = openGroups.has(item.label);
@@ -190,12 +213,12 @@ export function Sidebar({
             )}
           >
             <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[var(--color-primary)] text-xs font-semibold text-white">
-              {initials("Anil Deshmukh")}
+              {initials(session?.user?.name || "User")}
             </div>
             {!collapsed && (
               <div className="min-w-0">
-                <p className="truncate text-[13px] font-medium text-[var(--color-text)]">Anil Deshmukh</p>
-                <p className="truncate text-[11px] text-[var(--color-text-secondary)]">Society Admin</p>
+                <p className="truncate text-[13px] font-medium text-[var(--color-text)]">{session?.user?.name || "User"}</p>
+                <p className="truncate text-[11px] text-[var(--color-text-secondary)]">{isSuperAdmin ? "Super Admin" : "Society User"}</p>
               </div>
             )}
           </Link>

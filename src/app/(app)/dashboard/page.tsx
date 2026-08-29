@@ -1,3 +1,6 @@
+"use client";
+
+import { useEffect, useState } from "react";
 import {
   Building2,
   Home,
@@ -31,8 +34,16 @@ import {
   visitors,
 } from "@/lib/mock-data";
 import { formatCurrency, formatDate, daysUntil } from "@/lib/utils";
+import { getSocietySession } from "@/lib/session";
 
 export default function DashboardPage() {
+  const [activeSocietyName, setActiveSocietyName] = useState("Selected Society");
+
+  useEffect(() => {
+    const session = getSocietySession();
+    const activeSociety = session?.activeSociety;
+    setActiveSocietyName(activeSociety?.name ?? activeSociety?.society_name ?? "Selected Society");
+  }, []);
   const defaulters = maintenanceBills.filter((b) => b.status === "Overdue").slice(0, 5);
   const pending = maintenanceBills.filter((b) => b.status !== "Paid").slice(0, 5);
   const recentPayments = payments.slice(0, 5);
@@ -59,17 +70,11 @@ export default function DashboardPage() {
     <div>
       <PageHeader
         title="Dashboard"
-        description="Overview of Green Valley Co-operative Housing Society"
+        description={`Overview of ${activeSocietyName}`}
       />
 
       {/* Selectors */}
       <div className="mb-6 flex flex-col gap-3 rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-card)] p-4 sm:flex-row sm:items-end">
-        <Select
-          label="Society"
-          wrapperClassName="sm:max-w-[240px]"
-          options={[{ label: "Green Valley Co-operative Housing Society", value: "SOC001" }, { label: "Riverside Residency Society", value: "SOC002" }, { label: "Emerald Heights CHS", value: "SOC003" }]}
-          defaultValue="SOC001"
-        />
         <Select
           label="Building / Wing"
           wrapperClassName="sm:max-w-[200px]"

@@ -1,11 +1,5 @@
-import { PageHeader } from "@/components/layout/PageHeader";
-import { MembersByType } from "@/components/modules/MembersByType";
+import { SocietyMembers } from "@/components/modules/SocietyMembers";
 
 export default function OwnersPage() {
-  return (
-    <div>
-      <PageHeader title="Owners" description="All registered flat owners in the society" />
-      <MembersByType type="Owner" />
-    </div>
-  );
+  return <SocietyMembers type="OWNER" title="Owners" />;
 }
