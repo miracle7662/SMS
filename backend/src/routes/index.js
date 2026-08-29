@@ -6,6 +6,7 @@ import societyProfileRoutes from './society-profile.routes.js';
 import buildingRoutes from './building.routes.js';
 import floorRoutes from './floor.routes.js';
 import flatRoutes from './flat.routes.js';
+import societyUserRoutes from './society-user.routes.js';
 
 const router = express.Router();
 
@@ -18,6 +19,7 @@ router.use('/platform', platformRoutes);
 router.use('/society/buildings', buildingRoutes);
 router.use('/society/floors', floorRoutes);
 router.use('/society/flats', flatRoutes);
+router.use('/society/users', societyUserRoutes);
 router.use('/society', societyProfileRoutes);
 
 export default router;
