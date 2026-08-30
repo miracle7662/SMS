@@ -1,10 +1,1 @@
-import { ReportShell } from "@/components/modules/ReportShell";
-import { ComplaintsList } from "@/components/modules/ComplaintsList";
-
-export default function ComplaintsReportPage() {
-  return (
-    <ReportShell title="Complaints Report" description="Complaint resolution performance">
-      <ComplaintsList />
-    </ReportShell>
-  );
-}
+import{PageHeader}from"@/components/layout/PageHeader";import{AnalyticsManager}from"@/components/modules/AnalyticsManager";export default function Page(){return <div><PageHeader title="Complaints Report" description="Complaint status and recent activity"/><AnalyticsManager mode="complaints"/></div>}
