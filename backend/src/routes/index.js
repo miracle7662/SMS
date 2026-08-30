@@ -29,6 +29,7 @@ import staffRoutes from './staff.routes.js';
 import societyDocumentRoutes from './society-document.routes.js';
 import accountingRoutes from './accounting.routes.js';
 import analyticsRoutes from './analytics.routes.js';
+import notificationRoutes from './notification.routes.js';
 
 const router = express.Router();
 
@@ -64,6 +65,7 @@ router.use('/society/staff-management', staffRoutes);
 router.use('/society/documents', societyDocumentRoutes);
 router.use('/society/accounting', accountingRoutes);
 router.use('/society/analytics', analyticsRoutes);
+router.use('/society/notifications', notificationRoutes);
 router.use('/society', societyProfileRoutes);
 
 export default router;

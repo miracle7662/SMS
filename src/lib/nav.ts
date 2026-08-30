@@ -77,6 +77,7 @@ export const NAV: NavItem[] = [
       { label: "Notices", href: "/communication/notices" },
       { label: "Announcements", href: "/communication/announcements" },
       { label: "Circulars", href: "/communication/circulars" },
+      { label: "Notification Center", href: "/communication/notifications" },
       { label: "Notification History", href: "/communication/history" },
     ],
   },

@@ -64,6 +64,11 @@ export const config = {
     email: process.env.SUPER_ADMIN_EMAIL,
     password: process.env.SUPER_ADMIN_PASSWORD,
   },
+  notifications: {
+    email: { url: process.env.EMAIL_PROVIDER_WEBHOOK_URL || '', apiKey: process.env.EMAIL_PROVIDER_API_KEY || '' },
+    sms: { url: process.env.SMS_PROVIDER_WEBHOOK_URL || '', apiKey: process.env.SMS_PROVIDER_API_KEY || '' },
+    whatsapp: { url: process.env.WHATSAPP_PROVIDER_WEBHOOK_URL || '', apiKey: process.env.WHATSAPP_PROVIDER_API_KEY || '' },
+  },
 };
 
 export default config;

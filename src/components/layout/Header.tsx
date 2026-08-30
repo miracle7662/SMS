@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -20,7 +20,6 @@ import {
 } from "lucide-react";
 import { Dropdown } from "@/components/ui/Dropdown";
 import { cn, initials, formatDateTime } from "@/lib/utils";
-import { notifications as mockNotifications } from "@/lib/mock-data";
 import { clearActiveSociety, clearSocietySession, SocietySession } from "@/lib/session";
 
 const API_URL =
@@ -43,8 +42,26 @@ export function Header({
 
   const [notifOpen, setNotifOpen] = useState(false);
   const [logoutLoading, setLogoutLoading] = useState(false);
+  const [liveNotifications, setLiveNotifications] = useState<Array<{ id: number; title: string; message: string; status: string; created_at: string }>>([]);
+  const unread = liveNotifications.filter((n) => n.status !== "READ").length;
 
-  const unread = mockNotifications.filter((n) => !n.read).length;
+  useEffect(() => {
+    if (!session?.activeSociety || !session.accessToken) return;
+    fetch(`${API_URL}/society/notifications`, { headers: { Authorization: `Bearer ${session.accessToken}` } })
+      .then((response) => response.json())
+      .then((result) => {
+        if (!result.success) return;
+        const rows = result.data.my_notifications ?? result.data.notifications ?? [];
+        setLiveNotifications(rows.filter((row: { channel: string }) => row.channel === "IN_APP").slice(0, 8));
+      })
+      .catch(() => {});
+  }, [session?.activeSociety, session?.accessToken]);
+
+  async function markAllRead() {
+    if (!session?.accessToken) return;
+    await fetch(`${API_URL}/society/notifications/read-all`, { method: "PATCH", headers: { Authorization: `Bearer ${session.accessToken}` } });
+    setLiveNotifications((rows) => rows.map((row) => ({ ...row, status: "READ" })));
+  }
 
   async function handleLogout() {
     if (logoutLoading) return;
@@ -167,25 +184,25 @@ export function Header({
                     Notifications
                   </p>
 
-                  <span className="flex items-center gap-1 text-xs text-[var(--color-primary)]">
+                  <button type="button" onClick={() => void markAllRead()} className="flex items-center gap-1 text-xs text-[var(--color-primary)]">
                     <Check className="h-3.5 w-3.5" />
                     Mark all read
-                  </span>
+                  </button>
                 </div>
 
                 <div className="max-h-80 overflow-y-auto">
-                  {mockNotifications.map((n) => (
+                  {liveNotifications.map((n) => (
                     <div
                       key={n.id}
                       className={cn(
                         "flex gap-3 border-b border-[var(--color-border)] px-4 py-3 last:border-0",
-                        !n.read && "bg-[var(--color-primary)]/5"
+                        n.status !== "READ" && "bg-[var(--color-primary)]/5"
                       )}
                     >
                       <div
                         className={cn(
                           "mt-1 h-2 w-2 shrink-0 rounded-full",
-                          n.read
+                          n.status === "READ"
                             ? "bg-transparent"
                             : "bg-[var(--color-primary)]"
                         )}
@@ -201,7 +218,7 @@ export function Header({
                         </p>
 
                         <p className="mt-1 text-[11px] text-[var(--color-text-muted)]">
-                          {formatDateTime(n.time)}
+                          {formatDateTime(n.created_at)}
                         </p>
                       </div>
                     </div>
@@ -209,7 +226,7 @@ export function Header({
                 </div>
 
                 <Link
-                  href="/notifications"
+                  href="/communication/history"
                   className="block px-4 py-2.5 text-center text-xs font-medium text-[var(--color-primary)] hover:bg-[var(--color-bg)]"
                 >
                   View all notifications

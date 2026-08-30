@@ -145,6 +145,15 @@ If the database is not accessible:
 
 ## Troubleshooting
 
+### Notification providers
+
+In-app notifications require no external provider. For Email, SMS or WhatsApp,
+configure the matching `*_PROVIDER_WEBHOOK_URL` and optional
+`*_PROVIDER_API_KEY` values in `.env`. The webhook receives JSON containing
+`recipient`, `title`, `message`, `channel` and `notification_id`.
+
+Queued messages can be dispatched or retried from the Notification Center.
+
 ### MySQL Connection Errors
 
 #### Error: `connect ECONNREFUSED 127.0.0.1:3306`

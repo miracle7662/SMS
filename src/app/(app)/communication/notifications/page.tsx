@@ -1,0 +1,1 @@
+import{PageHeader}from"@/components/layout/PageHeader";import{NotificationManager}from"@/components/modules/NotificationManager";export default function Page(){return <div><PageHeader title="Notification Center" description="Templates, campaigns, providers and preferences"/><NotificationManager mode="center"/></div>}
