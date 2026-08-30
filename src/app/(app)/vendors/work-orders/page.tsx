@@ -1,0 +1,1 @@
+import{PageHeader}from"@/components/layout/PageHeader";import{VendorOperationsManager}from"@/components/modules/VendorOperationsManager";export default function Page(){return <div><PageHeader title="Work Orders" description="Assign, approve and track vendor work"/><VendorOperationsManager mode="work-orders"/></div>}

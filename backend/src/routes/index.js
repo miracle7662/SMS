@@ -23,6 +23,7 @@ import visitorRoutes from './visitor.routes.js';
 import parkingRoutes from './parking.routes.js';
 import amenityRoutes from './amenity.routes.js';
 import expenseRoutes from './expense.routes.js';
+import vendorOperationRoutes from './vendor-operation.routes.js';
 
 const router = express.Router();
 
@@ -52,6 +53,7 @@ router.use('/society/visitors', visitorRoutes);
 router.use('/society/parking', parkingRoutes);
 router.use('/society/amenities', amenityRoutes);
 router.use('/society/expenses', expenseRoutes);
+router.use('/society/vendor-operations', vendorOperationRoutes);
 router.use('/society', societyProfileRoutes);
 
 export default router;

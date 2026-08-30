@@ -121,7 +121,8 @@ export const NAV: NavItem[] = [
     icon: "Truck",
     children: [
       { label: "Vendor Master", href: "/vendors/master" },
-      { label: "Vendor Services", href: "/vendors/services" },
+      { label: "Vendor Contracts", href: "/vendors/services" },
+      { label: "Work Orders", href: "/vendors/work-orders" },
     ],
   },
   {
