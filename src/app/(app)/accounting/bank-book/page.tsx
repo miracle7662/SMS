@@ -1,0 +1,1 @@
+import{PageHeader}from"@/components/layout/PageHeader";import{AccountingManager}from"@/components/modules/AccountingManager";export default function Page(){return <div><PageHeader title="Bank Book" description="Bank receipts, payments and transfers"/><AccountingManager mode="bank-book"/></div>}

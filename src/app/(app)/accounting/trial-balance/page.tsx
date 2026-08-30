@@ -1,0 +1,1 @@
+import{PageHeader}from"@/components/layout/PageHeader";import{AccountingManager}from"@/components/modules/AccountingManager";export default function Page(){return <div><PageHeader title="Trial Balance" description="Debit and credit balances as of selected date"/><AccountingManager mode="trial-balance"/></div>}

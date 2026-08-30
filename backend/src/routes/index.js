@@ -26,6 +26,8 @@ import expenseRoutes from './expense.routes.js';
 import vendorOperationRoutes from './vendor-operation.routes.js';
 import inventoryRoutes from './inventory.routes.js';
 import staffRoutes from './staff.routes.js';
+import societyDocumentRoutes from './society-document.routes.js';
+import accountingRoutes from './accounting.routes.js';
 
 const router = express.Router();
 
@@ -58,6 +60,8 @@ router.use('/society/expenses', expenseRoutes);
 router.use('/society/vendor-operations', vendorOperationRoutes);
 router.use('/society/inventory', inventoryRoutes);
 router.use('/society/staff-management', staffRoutes);
+router.use('/society/documents', societyDocumentRoutes);
+router.use('/society/accounting', accountingRoutes);
 router.use('/society', societyProfileRoutes);
 
 export default router;

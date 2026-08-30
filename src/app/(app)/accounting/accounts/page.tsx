@@ -1,0 +1,1 @@
+import{PageHeader}from"@/components/layout/PageHeader";import{AccountingManager}from"@/components/modules/AccountingManager";export default function Page(){return <div><PageHeader title="Chart of Accounts" description="Society ledger accounts and balances"/><AccountingManager mode="accounts"/></div>}

@@ -1,0 +1,1 @@
+import{PageHeader}from"@/components/layout/PageHeader";import{AccountingManager}from"@/components/modules/AccountingManager";export default function Page(){return <div><PageHeader title="Accounting Vouchers" description="Receipt, payment, contra and journal entries"/><AccountingManager mode="vouchers"/></div>}

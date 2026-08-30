@@ -169,6 +169,18 @@ export const NAV: NavItem[] = [
     ],
   },
   {
+    label: "Accounting",
+    href: "/accounting",
+    icon: "BookOpenCheck",
+    children: [
+      { label: "Chart of Accounts", href: "/accounting/accounts" },
+      { label: "Vouchers", href: "/accounting/vouchers" },
+      { label: "Cash Book", href: "/accounting/cash-book" },
+      { label: "Bank Book", href: "/accounting/bank-book" },
+      { label: "Trial Balance", href: "/accounting/trial-balance" },
+    ],
+  },
+  {
     label: "Reports",
     href: "/reports",
     icon: "BarChart3",
