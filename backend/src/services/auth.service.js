@@ -9,6 +9,7 @@ import { generateAccessToken, generateRefreshToken } from '../utils/token-utils.
 import { normalizeMobile, normalizeEmail } from '../utils/normalize.js';
 import { ApiError } from '../utils/api-error.js';
 import crypto from 'crypto';
+import securityRepository from '../repositories/security.repository.js';
 
 export class AuthService {
   async login(loginValue, password, ipAddress, userAgent) {
@@ -23,11 +24,13 @@ export class AuthService {
     }
 
     if (!user) {
+      await securityRepository.log({ eventType: 'LOGIN_FAILED', severity: 'MEDIUM', identifier: loginValue, ipAddress, userAgent, details: { reason: 'unknown_identity' } });
       throw new ApiError(401, 'Invalid login credentials');
     }
 
     // Check if account is locked
     if (user.locked_until && new Date(user.locked_until) > new Date()) {
+      await securityRepository.log({ userId: user.id, eventType: 'ACCOUNT_LOCKED', severity: 'HIGH', identifier: loginValue, ipAddress, userAgent, details: { reason: 'login_while_locked' } });
       throw new ApiError(429, 'Account is temporarily locked. Please try again later.');
     }
 
@@ -39,8 +42,10 @@ export class AuthService {
       if (user.failed_login_attempts + 1 >= maxAttempts) {
         const lockUntil = new Date(Date.now() + config.auth.loginLockMinutes * 60 * 1000);
         await userRepository.updateFailedLoginAttemptsAndLock(user.id, lockUntil);
+        await securityRepository.log({ userId: user.id, eventType: 'ACCOUNT_LOCKED', severity: 'HIGH', identifier: loginValue, ipAddress, userAgent, details: { failed_attempts: user.failed_login_attempts + 1 } });
       } else {
         await userRepository.incrementFailedLoginAttempts(user.id);
+        await securityRepository.log({ userId: user.id, eventType: 'LOGIN_FAILED', severity: 'MEDIUM', identifier: loginValue, ipAddress, userAgent, details: { failed_attempts: user.failed_login_attempts + 1 } });
       }
 
       throw new ApiError(401, 'Invalid login credentials');

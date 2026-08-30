@@ -369,3 +369,7 @@ Run `npm run migrate` after updating the code. Migration `029_saas_subscription_
 Super Admin endpoints are under `/api/v1/platform`: `GET /subscriptions`, `POST /subscription-plans`, `POST /subscriptions`, `PATCH /subscriptions/:id/status`, `POST /invoices` and `POST /invoices/:id/payments`.
 
 Society-scoped APIs reject inactive or expired subscriptions. Plan limits are enforced while creating buildings, generating flats and adding society users. A `NULL` limit means unlimited.
+
+## Security monitoring
+
+Migration `030_security_monitoring.sql` adds safe security events for failed logins and locked accounts. Super Admin can use `GET /api/v1/platform/security`, resolve alerts, unlock a verified user and revoke that user's refresh-token sessions. Passwords, raw tokens and unmasked login identifiers are never written to security events.

@@ -3,6 +3,7 @@ import { verifyRefreshToken } from '../utils/token-utils.js';
 import { sendSuccess } from '../utils/api-response.js';
 import { ApiError } from '../utils/api-error.js';
 import { asyncHandler } from '../utils/async-handler.js';
+import securityRepository from '../repositories/security.repository.js';
 
 export const login = asyncHandler(async (req, res) => sendSuccess(res, 200, 'Login successful',
   await authService.login(req.body.login, req.body.password, req.ip, req.get('user-agent'))));
@@ -14,8 +15,14 @@ export const selectSociety = asyncHandler(async (req, res) => sendSuccess(res, 2
 export const refresh = asyncHandler(async (req, res) => {
   let decoded;
   try { decoded = verifyRefreshToken(req.body.refresh_token); }
-  catch { throw new ApiError(401, 'Refresh token is invalid or expired'); }
-  if (decoded.tokenType !== 'refresh' || !decoded.sub) throw new ApiError(401, 'Invalid refresh token');
+  catch {
+    await securityRepository.log({ eventType: 'TOKEN_REJECTED', severity: 'MEDIUM', ipAddress: req.ip, userAgent: req.get('user-agent'), details: { reason: 'invalid_or_expired_refresh_token' } });
+    throw new ApiError(401, 'Refresh token is invalid or expired');
+  }
+  if (decoded.tokenType !== 'refresh' || !decoded.sub) {
+    await securityRepository.log({ eventType: 'TOKEN_REJECTED', severity: 'HIGH', ipAddress: req.ip, userAgent: req.get('user-agent'), details: { reason: 'invalid_token_type' } });
+    throw new ApiError(401, 'Invalid refresh token');
+  }
   return sendSuccess(res, 200, 'Token refreshed successfully',
     await authService.refreshAccessToken(decoded.sub, req.body.refresh_token));
 });

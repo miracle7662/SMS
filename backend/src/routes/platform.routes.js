@@ -6,6 +6,8 @@ import { handleValidationErrors } from '../validators/auth.validators.js';
 import { validateCreateSociety } from '../validators/platform-society.validators.js';
 import { assignSubscription, createInvoice, createPlan, dashboard, recordPayment, updateSubscriptionStatus } from '../controllers/subscription.controller.js';
 import { validateAssign, validateInvoice, validatePayment, validatePlan, validateStatus } from '../validators/subscription.validators.js';
+import { resolveSecurityEvent, revokeSecuritySessions, securityDashboard, unlockSecurityUser } from '../controllers/security.controller.js';
+import { validateSecurityDashboard, validateSecurityEvent, validateSecurityUser } from '../validators/security.validators.js';
 
 const router = express.Router();
 
@@ -18,5 +20,9 @@ router.post('/subscriptions', validateAssign, handleValidationErrors, assignSubs
 router.patch('/subscriptions/:id/status', validateStatus, handleValidationErrors, updateSubscriptionStatus);
 router.post('/invoices', validateInvoice, handleValidationErrors, createInvoice);
 router.post('/invoices/:id/payments', validatePayment, handleValidationErrors, recordPayment);
+router.get('/security', validateSecurityDashboard, handleValidationErrors, securityDashboard);
+router.patch('/security/events/:id', validateSecurityEvent, handleValidationErrors, resolveSecurityEvent);
+router.post('/security/users/:id/unlock', validateSecurityUser, handleValidationErrors, unlockSecurityUser);
+router.post('/security/users/:id/revoke-sessions', validateSecurityUser, handleValidationErrors, revokeSecuritySessions);
 
 export default router;
