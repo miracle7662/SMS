@@ -22,6 +22,7 @@ import complaintRoutes from './complaint.routes.js';
 import visitorRoutes from './visitor.routes.js';
 import parkingRoutes from './parking.routes.js';
 import amenityRoutes from './amenity.routes.js';
+import expenseRoutes from './expense.routes.js';
 
 const router = express.Router();
 
@@ -50,6 +51,7 @@ router.use('/society/complaints', complaintRoutes);
 router.use('/society/visitors', visitorRoutes);
 router.use('/society/parking', parkingRoutes);
 router.use('/society/amenities', amenityRoutes);
+router.use('/society/expenses', expenseRoutes);
 router.use('/society', societyProfileRoutes);
 
 export default router;
