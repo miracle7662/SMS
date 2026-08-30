@@ -373,3 +373,9 @@ Society-scoped APIs reject inactive or expired subscriptions. Plan limits are en
 ## Security monitoring
 
 Migration `030_security_monitoring.sql` adds safe security events for failed logins and locked accounts. Super Admin can use `GET /api/v1/platform/security`, resolve alerts, unlock a verified user and revoke that user's refresh-token sessions. Passwords, raw tokens and unmasked login identifiers are never written to security events.
+
+## Backup and system health
+
+Migration `031_backup_and_system_health.sql` tracks MySQL backups and health snapshots. Configure `MYSQLDUMP_PATH`, `MYSQL_PATH`, `BACKUP_DIR` and `BACKUP_RETENTION_DAYS` in `.env`. Super Admin can create, download, verify and restore backups from `/api/v1/platform/backups`; restore requires the exact confirmation phrase and creates a pre-restore backup first. Database passwords are passed to MySQL tools through the child-process environment and are never included in command arguments or logs.
+
+Run `npm run backup` for a scheduled backup. On Windows, create a Task Scheduler job that runs `npm.cmd run backup` with the `backend` folder as its working directory. Schedule this command daily and monitor its non-zero exit code for failures.

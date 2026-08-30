@@ -1,0 +1,10 @@
+import service from '../services/backup.service.js';
+import { asyncHandler } from '../utils/async-handler.js';
+import { sendSuccess } from '../utils/api-response.js';
+const meta=req=>({ip:req.ip,userAgent:req.get('user-agent')});
+export const systemHealth=asyncHandler(async(req,res)=>sendSuccess(res,200,'System health fetched successfully',await service.health()));
+export const listBackups=asyncHandler(async(req,res)=>sendSuccess(res,200,'Backups fetched successfully',await service.list()));
+export const createBackup=asyncHandler(async(req,res)=>sendSuccess(res,201,'Database backup completed successfully',await service.create('MANUAL',req.auth.userId,meta(req))));
+export const verifyBackup=asyncHandler(async(req,res)=>sendSuccess(res,200,'Backup verification completed',await service.verify(Number(req.params.id))));
+export const restoreBackup=asyncHandler(async(req,res)=>sendSuccess(res,200,'Database restored successfully',await service.restore(Number(req.params.id),req.body.confirmation,req.auth.userId,meta(req))));
+export const downloadBackup=asyncHandler(async(req,res)=>{const {backup,file}=await service.resolveFile(Number(req.params.id));res.download(file,backup.file_name);});

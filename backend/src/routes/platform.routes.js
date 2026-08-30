@@ -8,6 +8,8 @@ import { assignSubscription, createInvoice, createPlan, dashboard, recordPayment
 import { validateAssign, validateInvoice, validatePayment, validatePlan, validateStatus } from '../validators/subscription.validators.js';
 import { resolveSecurityEvent, revokeSecuritySessions, securityDashboard, unlockSecurityUser } from '../controllers/security.controller.js';
 import { validateSecurityDashboard, validateSecurityEvent, validateSecurityUser } from '../validators/security.validators.js';
+import { createBackup, downloadBackup, listBackups, restoreBackup, systemHealth, verifyBackup } from '../controllers/backup.controller.js';
+import { validateBackupId, validateRestore } from '../validators/backup.validators.js';
 
 const router = express.Router();
 
@@ -24,5 +26,11 @@ router.get('/security', validateSecurityDashboard, handleValidationErrors, secur
 router.patch('/security/events/:id', validateSecurityEvent, handleValidationErrors, resolveSecurityEvent);
 router.post('/security/users/:id/unlock', validateSecurityUser, handleValidationErrors, unlockSecurityUser);
 router.post('/security/users/:id/revoke-sessions', validateSecurityUser, handleValidationErrors, revokeSecuritySessions);
+router.get('/system/health', systemHealth);
+router.get('/backups', listBackups);
+router.post('/backups', createBackup);
+router.get('/backups/:id/download', validateBackupId, handleValidationErrors, downloadBackup);
+router.post('/backups/:id/verify', validateBackupId, handleValidationErrors, verifyBackup);
+router.post('/backups/:id/restore', validateRestore, handleValidationErrors, restoreBackup);
 
 export default router;

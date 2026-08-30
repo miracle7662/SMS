@@ -69,6 +69,12 @@ export const config = {
     sms: { url: process.env.SMS_PROVIDER_WEBHOOK_URL || '', apiKey: process.env.SMS_PROVIDER_API_KEY || '' },
     whatsapp: { url: process.env.WHATSAPP_PROVIDER_WEBHOOK_URL || '', apiKey: process.env.WHATSAPP_PROVIDER_API_KEY || '' },
   },
+  backup: {
+    directory: process.env.BACKUP_DIR || 'backups',
+    mysqldumpPath: process.env.MYSQLDUMP_PATH || 'mysqldump',
+    mysqlPath: process.env.MYSQL_PATH || 'mysql',
+    retentionDays: parseInt(process.env.BACKUP_RETENTION_DAYS || '30', 10),
+  },
 };
 
 export default config;

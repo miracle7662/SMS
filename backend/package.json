@@ -8,7 +8,8 @@
     "dev": "nodemon src/server.js",
     "start": "node src/server.js",
     "migrate": "node migrate.js",
-    "seed:auth": "node src/seed.js"
+    "seed:auth": "node src/seed.js",
+    "backup": "node backup.js"
   },
   "keywords": [
     "society",

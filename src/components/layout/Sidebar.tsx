@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import { ChevronDown, ChevronsLeft, Building, Building2, CreditCard, ShieldAlert } from "lucide-react";
+import { ChevronDown, ChevronsLeft, Building, Building2, CreditCard, Database, ShieldAlert } from "lucide-react";
 import { NAV } from "@/lib/nav";
 import { ICON_MAP } from "./icon-map";
 import { cn } from "@/lib/utils";
@@ -102,6 +102,18 @@ export function Sidebar({
                 >
                   <Building2 className="h-[18px] w-[18px] shrink-0" />
                   {!collapsed && <span className="truncate">Manage Societies</span>}
+                </Link>
+              </li>
+            )}
+            {isSuperAdmin && (
+              <li className="group relative">
+                <Link href="/super-admin/system" onClick={onCloseMobile} className={cn(
+                  "flex items-center gap-3 rounded-[var(--radius-md)] px-3 py-2.5 text-sm font-medium transition-colors",
+                  pathname.startsWith("/super-admin/system") ? "bg-[var(--color-primary)]/10 text-[var(--color-primary)]" : "text-[var(--color-text-secondary)] hover:bg-[var(--color-bg)] hover:text-[var(--color-text)]",
+                  collapsed && "lg:justify-center"
+                )}>
+                  <Database className="h-[18px] w-[18px] shrink-0" />
+                  {!collapsed && <span className="truncate">Backup & System Health</span>}
                 </Link>
               </li>
             )}
