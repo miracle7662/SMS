@@ -3,6 +3,7 @@ import societyAccessRepository from '../repositories/society-access.repository.j
 import { sendError } from '../utils/api-response.js';
 import { asyncHandler } from '../utils/async-handler.js';
 import { ApiError } from '../utils/api-error.js';
+import subscriptionRepository from '../repositories/subscription.repository.js';
 
 export const requireActiveSociety = asyncHandler(async (req, res, next) => {
   if (!req.auth.activeSocietyId) {
@@ -19,6 +20,18 @@ export const requireActiveSociety = asyncHandler(async (req, res, next) => {
 
   if (!hasAccess) {
     throw new ApiError(403, 'You do not have access to this society');
+  }
+
+  if (!isSuperAdmin) {
+    const entitlement = await subscriptionRepository.entitlement(req.auth.activeSocietyId);
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const active = entitlement && ['ACTIVE', 'TRIAL'].includes(entitlement.status);
+    const beforeEnd = entitlement && (!entitlement.end_date || new Date(entitlement.end_date) >= today);
+    const beforeTrialEnd = entitlement && (entitlement.status !== 'TRIAL' || !entitlement.trial_end_date || new Date(entitlement.trial_end_date) >= today);
+    if (!active || !beforeEnd || !beforeTrialEnd) {
+      throw new ApiError(402, 'Society subscription is inactive or expired. Please contact the platform administrator.');
+    }
+    req.auth.entitlement = entitlement;
   }
 
   next();

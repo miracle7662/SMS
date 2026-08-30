@@ -362,3 +362,10 @@ Every society-specific table includes a `society_id` column. Key principles:
 ## License
 
 ISC
+## SaaS subscriptions and platform billing
+
+Run `npm run migrate` after updating the code. Migration `029_saas_subscription_billing.sql` creates plans, society subscriptions, platform invoices and payments. Existing societies receive the unlimited `LEGACY_FREE` plan so the rollout does not block them.
+
+Super Admin endpoints are under `/api/v1/platform`: `GET /subscriptions`, `POST /subscription-plans`, `POST /subscriptions`, `PATCH /subscriptions/:id/status`, `POST /invoices` and `POST /invoices/:id/payments`.
+
+Society-scoped APIs reject inactive or expired subscriptions. Plan limits are enforced while creating buildings, generating flats and adding society users. A `NULL` limit means unlimited.
