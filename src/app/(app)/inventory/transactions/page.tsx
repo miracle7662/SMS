@@ -1,0 +1,1 @@
+import{PageHeader}from"@/components/layout/PageHeader";import{InventoryManager}from"@/components/modules/InventoryManager";export default function Page(){return <div><PageHeader title="Stock Transactions" description="Record inward, consumption, damage and other outward stock"/><InventoryManager mode="transactions"/></div>}

@@ -15,6 +15,8 @@ import {
   BarChart3,
   ShieldCheck,
   Settings,
+  PackageSearch,
+  ContactRound,
   LucideIcon,
 } from "lucide-react";
 
@@ -35,4 +37,6 @@ export const ICON_MAP: Record<string, LucideIcon> = {
   BarChart3,
   ShieldCheck,
   Settings,
+  PackageSearch,
+  ContactRound,
 };

@@ -1,0 +1,1 @@
+import{PageHeader}from"@/components/layout/PageHeader";import{StaffManager}from"@/components/modules/StaffManager";export default function Page(){return <div><PageHeader title="Staff Attendance" description="Daily attendance and monthly records"/><StaffManager mode="attendance"/></div>}

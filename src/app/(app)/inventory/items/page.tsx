@@ -1,0 +1,1 @@
+import{PageHeader}from"@/components/layout/PageHeader";import{InventoryManager}from"@/components/modules/InventoryManager";export default function Page(){return <div><PageHeader title="Inventory Items" description="Current stock, reorder level and storage location"/><InventoryManager mode="items"/></div>}

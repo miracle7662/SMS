@@ -1,0 +1,1 @@
+import{PageHeader}from"@/components/layout/PageHeader";import{InventoryManager}from"@/components/modules/InventoryManager";export default function Page(){return <div><PageHeader title="Inventory Categories" description="Organize society stock items"/><InventoryManager mode="categories"/></div>}

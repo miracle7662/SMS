@@ -136,6 +136,27 @@ export const NAV: NavItem[] = [
     ],
   },
   {
+    label: "Inventory",
+    href: "/inventory",
+    icon: "PackageSearch",
+    children: [
+      { label: "Categories", href: "/inventory/categories" },
+      { label: "Item Master", href: "/inventory/items" },
+      { label: "Stock Transactions", href: "/inventory/transactions" },
+      { label: "Low Stock", href: "/inventory/low-stock" },
+    ],
+  },
+  {
+    label: "Staff & Payroll",
+    href: "/staff",
+    icon: "ContactRound",
+    children: [
+      { label: "Staff Master", href: "/staff/master" },
+      { label: "Attendance", href: "/staff/attendance" },
+      { label: "Payroll", href: "/staff/payroll" },
+    ],
+  },
+  {
     label: "Documents",
     href: "/documents",
     icon: "FolderOpen",

@@ -1,0 +1,1 @@
+import{PageHeader}from"@/components/layout/PageHeader";import{StaffManager}from"@/components/modules/StaffManager";export default function Page(){return <div><PageHeader title="Society Staff" description="Employees, salary structure and bank details"/><StaffManager mode="staff"/></div>}
