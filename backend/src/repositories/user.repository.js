@@ -7,7 +7,7 @@ class UserRepository {
     const pool = getPool();
     const [rows] = await pool.execute(
       `SELECT id, name, mobile, email, password_hash, profile_image, status,
-              failed_login_attempts, locked_until, password_changed_at, last_login
+              failed_login_attempts, locked_until, password_changed_at, last_login, must_change_password, invitation_status
        FROM users 
        WHERE (mobile = ? OR email = ?) 
          AND deleted_at IS NULL 
@@ -21,7 +21,7 @@ class UserRepository {
     const pool = getPool();
     const [rows] = await pool.execute(
       `SELECT id, name, mobile, email, profile_image, status,
-              failed_login_attempts, locked_until, password_changed_at, last_login
+              failed_login_attempts, locked_until, password_changed_at, last_login, must_change_password, invitation_status
        FROM users
        WHERE id = ? AND deleted_at IS NULL
        LIMIT 1`,
@@ -58,6 +58,16 @@ class UserRepository {
        WHERE id = ? AND deleted_at IS NULL`,
       [id]
     );
+  }
+
+  static async findWithPassword(id) {
+    const [rows] = await getPool().execute(`SELECT id,password_hash,must_change_password FROM users WHERE id=? AND status='ACTIVE' AND deleted_at IS NULL LIMIT 1`,[id]);
+    return rows[0] || null;
+  }
+
+  static async changePassword(id,passwordHash) {
+    const connection=await getPool().getConnection();
+    try {await connection.beginTransaction();await connection.execute(`UPDATE users SET password_hash=?,must_change_password=0,password_changed_at=UTC_TIMESTAMP(),invitation_status=CASE WHEN invitation_status IN('PENDING','SENT') THEN 'ACCEPTED' ELSE invitation_status END WHERE id=?`,[passwordHash,id]);await connection.execute(`UPDATE society_onboarding_invitations SET status='ACCEPTED',accepted_at=UTC_TIMESTAMP() WHERE user_id=? AND status IN('PENDING','SENT')`,[id]);await connection.commit();}catch(error){await connection.rollback();throw error;}finally{connection.release();}
   }
 
   // User by ID

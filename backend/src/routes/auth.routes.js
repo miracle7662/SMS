@@ -6,6 +6,7 @@ import {
   logout,
   getMe,
   getSocieties,
+  changePassword,
 } from '../controllers/auth.controller.js';
 import {
   validateLogin,
@@ -13,6 +14,7 @@ import {
   validateRefresh,
   validateLogout,
   handleValidationErrors,
+  validateChangePassword,
 } from '../validators/auth.validators.js';
 import { authenticate } from '../middleware/authenticate.middleware.js';
 
@@ -59,5 +61,6 @@ router.get('/me', authenticate, getMe);
  * @access  Private
  */
 router.get('/societies', authenticate, getSocieties);
+router.post('/change-password', validateChangePassword, handleValidationErrors, authenticate, changePassword);
 
 export default router;

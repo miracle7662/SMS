@@ -49,5 +49,10 @@ export const authenticate = asyncHandler(async (req, res, next) => {
     societyId: activeSocietyId,
   };
 
+  const passwordChangeAllowed = ['/api/v1/auth/change-password','/api/v1/auth/logout','/api/v1/auth/me'].some((path) => req.originalUrl.startsWith(path));
+  if (user.must_change_password && !passwordChangeAllowed) {
+    throw new ApiError(403, 'Password change is required before continuing');
+  }
+
   next();
 });

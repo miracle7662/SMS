@@ -39,3 +39,5 @@ export const getSocieties = asyncHandler(async (req, res) => sendSuccess(res, 20
   'Societies fetched successfully', req.auth.platformRoles.includes('SUPER_ADMIN')
     ? await authService.getAllActiveSocieties()
     : await authService.getUserSocieties(req.auth.userId)));
+
+export const changePassword = asyncHandler(async (req,res)=>sendSuccess(res,200,'Password changed successfully',await authService.changePassword(req.auth.userId,req.body.current_password,req.body.new_password,req.ip,req.get('user-agent'))));

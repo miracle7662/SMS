@@ -379,3 +379,40 @@ Migration `030_security_monitoring.sql` adds safe security events for failed log
 Migration `031_backup_and_system_health.sql` tracks MySQL backups and health snapshots. Configure `MYSQLDUMP_PATH`, `MYSQL_PATH`, `BACKUP_DIR` and `BACKUP_RETENTION_DAYS` in `.env`. Super Admin can create, download, verify and restore backups from `/api/v1/platform/backups`; restore requires the exact confirmation phrase and creates a pre-restore backup first. Database passwords are passed to MySQL tools through the child-process environment and are never included in command arguments or logs.
 
 Run `npm run backup` for a scheduled backup. On Windows, create a Task Scheduler job that runs `npm.cmd run backup` with the `backend` folder as its working directory. Schedule this command daily and monitor its non-zero exit code for failures.
+## Society onboarding and first login
+
+Migration `032_society_onboarding.sql` adds society onboarding status,
+administrator invitations and mandatory first-login password changes.
+
+Super Admin can use the following platform endpoints:
+
+- `GET /api/v1/platform/onboarding`
+- `POST /api/v1/platform/onboarding`
+- `POST /api/v1/platform/onboarding/:id/go-live`
+- `POST /api/v1/platform/onboarding/:id/resend`
+
+The onboarding operation creates the following records in one database
+transaction:
+
+- Society
+- Active subscription
+- Society Admin user or existing-user assignment
+- Society access
+- `SOCIETY_ADMIN` role assignment
+- Onboarding invitation
+
+New users receive a cryptographically generated temporary password. Only its
+bcrypt hash is stored in the database. Existing mobile users are assigned to
+the society without changing their current password.
+
+A user with `must_change_password` enabled is redirected to the first-login
+password-change page. The password is changed through:
+
+`POST /api/v1/auth/change-password`
+
+A society can go live only when it has:
+
+- An assigned Society Admin
+- An active subscription plan
+- At least one building
+- At least one flat

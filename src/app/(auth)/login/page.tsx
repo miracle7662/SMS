@@ -48,10 +48,14 @@ export default function LoginPage() {
       storage.setItem("society_user", JSON.stringify(result.data.user));
       storage.setItem("society_societies", JSON.stringify(result.data.societies ?? []));
       storage.setItem("society_platform_roles", JSON.stringify(platformRoles));
+      storage.setItem("society_must_change_password", String(Boolean(result.data.must_change_password ?? result.data.mustChangePassword)));
 
       const isSuperAdmin = platformRoles.includes("SUPER_ADMIN");
       const requiresSocietySelection = result.data.requires_society_selection ?? result.data.requiresSocietySelection;
-      const redirectPath = isSuperAdmin
+      const mustChangePassword = Boolean(result.data.must_change_password ?? result.data.mustChangePassword);
+      const redirectPath = mustChangePassword
+        ? "/change-password"
+        : isSuperAdmin
         ? "/super-admin/societies"
         : requiresSocietySelection === true
           ? "/select-society"

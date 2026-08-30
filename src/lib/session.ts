@@ -77,6 +77,7 @@ export function clearSocietySession() {
     "society_platform_roles",
     "society_active",
     "society_active_roles",
+    "society_must_change_password",
   ];
   for (const storage of [window.localStorage, window.sessionStorage]) {
     keys.forEach((key) => storage.removeItem(key));

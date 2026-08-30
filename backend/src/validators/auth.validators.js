@@ -38,6 +38,15 @@ export const validateLogout = [
     .withMessage('Refresh token must not exceed 2000 characters'),
 ];
 
+export const validateChangePassword = [
+  body('current_password').isString().isLength({ min: 8, max: 72 }).withMessage('Current password is required'),
+  body('new_password').isString().isLength({ min: 8, max: 72 }).withMessage('New password must contain 8 to 72 characters')
+    .matches(/[A-Z]/).withMessage('New password must include an uppercase letter')
+    .matches(/[a-z]/).withMessage('New password must include a lowercase letter')
+    .matches(/[0-9]/).withMessage('New password must include a number')
+    .matches(/[^A-Za-z0-9]/).withMessage('New password must include a special character'),
+];
+
 // Middleware to handle validation errors
 export const handleValidationErrors = (req, res, next) => {
   const errors = validationResult(req);
@@ -53,5 +62,6 @@ export default {
   validateSelectSociety,
   validateRefresh,
   validateLogout,
+  validateChangePassword,
   handleValidationErrors,
 };

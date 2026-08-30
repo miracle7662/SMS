@@ -122,7 +122,17 @@ export class AuthService {
       accessToken,
       refreshToken: refreshTokenRaw,
       expiresIn: config.jwt.accessExpiresIn,
+      mustChangePassword: Boolean(user.must_change_password),
     };
+  }
+
+  async changePassword(userId,currentPassword,newPassword,ipAddress,userAgent) {
+    const user=await userRepository.findWithPassword(userId);
+    if(!user||!await comparePassword(currentPassword,user.password_hash))throw new ApiError(401,'Current password is incorrect');
+    if(currentPassword===newPassword)throw new ApiError(400,'New password must be different from the current password');
+    await userRepository.changePassword(userId,await hashPassword(newPassword));
+    await auditRepository.log({userId,moduleName:'authentication',action:'change_password',ipAddress,userAgent});
+    return{password_changed:true};
   }
 
   async selectSociety(userId, societyId, ipAddress, userAgent) {

@@ -1,0 +1,4 @@
+import{body,param}from'express-validator';
+export const validateOnboarding=[body('society.society_code').trim().notEmpty().matches(/^[A-Za-z0-9_-]+$/).isLength({max:50}),body('society.society_name').trim().notEmpty().isLength({max:200}),body('society.email').optional({checkFalsy:true}).isEmail(),body('society.pincode').optional({checkFalsy:true}).matches(/^\d{6}$/),body('admin.name').trim().notEmpty().isLength({max:150}),body('admin.mobile').trim().isLength({min:10,max:20}),body('admin.email').optional({checkFalsy:true}).isEmail(),body('plan_id').isInt({min:1}).withMessage('Subscription plan is required'),body('use_trial').optional().isBoolean(),body('invitation_channel').isIn(['NONE','EMAIL','SMS','WHATSAPP'])];
+export const validateGoLive=[param('id').isInt({min:1})];
+export const validateResend=[param('id').isInt({min:1}),body('channel').isIn(['EMAIL','SMS','WHATSAPP'])];
